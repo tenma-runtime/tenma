@@ -24,7 +24,7 @@ public static function report(string $source, array $list): void
 Replaces the problems $source reports: the editor shows them at their line (through `tenma lsp`), and new
 ones go to stderr as `path:line:column: error: message`, the form problem matchers and quickfix read. An
 empty list clears them. Only under --watch, which also clears the script's lists when it reloads it;
-otherwise it does nothing. $source names the reporter: 'waypoint-live', 'app:checks'. A relative file
+otherwise it does nothing. $source names the reporter: 'io-live', 'app:checks'. A relative file
 counts from the working directory.
 
 **Parameters**

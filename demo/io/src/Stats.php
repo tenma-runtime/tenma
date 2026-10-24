@@ -1,6 +1,6 @@
 <?php
 
-namespace App;
+namespace Demo;
 
 /** Lives as long as the process: under tenma across all requests, under FPM for just one. */
 class Stats

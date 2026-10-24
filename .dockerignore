@@ -1,5 +1,5 @@
 target
 php-build/out
 php-build/php-*
-demo/waypoint/vendor
+demo/io/vendor
 .git

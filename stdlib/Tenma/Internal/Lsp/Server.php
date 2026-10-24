@@ -51,7 +51,7 @@ final class Server
             $before = $this->published[$project] ?? [];
             $now = [];
             foreach ($files as $file) {
-                // app.waypoint-live.json: published by the script, as 'waypoint-live'
+                // app.io-live.json: published by the script, as 'io-live'
                 $source = (string) preg_replace('/^(app|dev)\.|\.json$/', '', basename($file));
                 $list = json_decode((string) @file_get_contents($file), true);
                 foreach (is_array($list) ? $list : [] as $problem) {

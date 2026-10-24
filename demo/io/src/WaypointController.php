@@ -1,10 +1,10 @@
 <?php
 
-namespace App;
+namespace Demo;
 
-use Waypoint\Attributes\{Body, Controller, Delete, Get, Inject, Param, Post};
-use Waypoint\Exceptions\NotFoundException;
-use Waypoint\Http\Response;
+use Io\Attributes\{Body, Controller, Delete, Get, Inject, Param, Post};
+use Io\Exceptions\NotFoundException;
+use Io\Http\Response;
 
 #[Controller('/waypoints')]
 class WaypointController

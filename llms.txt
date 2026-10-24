@@ -61,9 +61,9 @@ CLI: `tenma app.php`, `--watch`, `--inspect` (a DAP debugger on 127.0.0.1:9229),
 
 - [tenma/stubs](https://github.com/tenma-runtime/stubs): the stubs for IDEs and PHPStan, installed with `composer require --dev tenma/stubs`. They are never autoloaded
 - [tenma/psr](https://github.com/tenma-runtime/psr): runs any PSR-15 app under Tenma with `new Http\Server(3000, Tenma\Psr\Psr::handler($app, new Psr17Factory()))->start()`. WebSockets and streams go out through `Tenma\Psr\Upgrade`
-- [Waypoint](https://github.com/systonia/Waypoint): a PHP framework that is itself a Tenma handler, with `new Http\Server(8080, $app)->start()`, and that hands requests over to WebSockets and streams with `Response::upgrade()`
-- [Waypoint Live](https://github.com/systonia/Waypoint-Live): live components for Waypoint: state stays on the server, events and updates travel over one WebSocket, running under Tenma
-- [Waypoint-Bakery](https://github.com/systonia/Waypoint-Bakery): the example app the docs quote, a bakery's shop with `Threading\Task::all()` on the product page, timers that keep web service answers in worker memory, an order board across workers through `Messaging\Channel::publish()`, and Postgres migrations as `tenma index.php db:migrate`
+- [Io](https://github.com/io-framework/framework): a PHP framework that is itself a Tenma handler, with `new Http\Server(8080, $app)->start()`, and that hands requests over to WebSockets and streams with `Response::upgrade()`
+- [Io Live](https://github.com/io-framework/live): live components for Io: state stays on the server, events and updates travel over one WebSocket, running under Tenma
+- [Io Bakery](https://github.com/io-framework/bakery): the example app the docs quote, a bakery's shop with `Threading\Task::all()` on the product page, timers that keep web service answers in worker memory, an order board across workers through `Messaging\Channel::publish()`, and Postgres migrations as `tenma index.php db:migrate`
 
 ## Optional
 

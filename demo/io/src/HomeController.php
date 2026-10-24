@@ -1,8 +1,8 @@
 <?php
 
-namespace App;
+namespace Demo;
 
-use Waypoint\Attributes\{Controller, Get, Inject};
+use Io\Attributes\{Controller, Get, Inject};
 
 #[Controller]
 class HomeController

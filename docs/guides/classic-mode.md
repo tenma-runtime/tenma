@@ -128,6 +128,6 @@ A PSR-15 app runs in fiber mode through [tenma/psr](https://github.com/tenma-run
 new Http\Server(3000, Tenma\Psr\Psr::handler($app, new Nyholm\Psr7\Factory\Psr17Factory()))->start();
 ```
 
-A [Waypoint](https://github.com/systonia/Waypoint) app is a handler itself and runs with `new Http\Server(8080, $app)->start()`.
+An [Io](https://github.com/io-framework/framework) app is a handler itself and runs with `new Http\Server(8080, $app)->start()`.
 
 See also: [`Http\ClassicServer`](../reference/Http/ClassicServer.md), [`Http\Server`](../reference/Http/Server.md), [Serving HTTP](http.md).

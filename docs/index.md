@@ -64,4 +64,4 @@ The [guides](guides/index.md) come in four parts:
 
 The [reference](reference/index.md) has one page per class of the PHP API, generated from the code with `tenma docs`.
 
-A complete example app, [Waypoint-Bakery](https://github.com/systonia/Waypoint-Bakery), runs on Tenma.
+A complete example app, [Io Bakery](https://github.com/io-framework/bakery), runs on Tenma.

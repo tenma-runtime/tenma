@@ -101,8 +101,8 @@ cargo test --release
 Run the demo:
 
 ```
-(cd demo/waypoint && composer install)
-./target/release/tenma demo/waypoint/index.php
+(cd demo/io && composer install)
+./target/release/tenma demo/io/index.php
 ```
 
 Format before a commit. CI checks all of it; long PHP lines are only warnings for now.

@@ -1,6 +1,6 @@
 <?php
 
-namespace App;
+namespace Demo;
 
 /** Waypoints in memory. Under tenma they persist between requests. */
 class WaypointStore

@@ -94,7 +94,7 @@ The debugger works as always, and gains two commands: step back and reverse cont
 does not run code backwards: tenma starts the replay over and runs it to the statement before, in the
 same request, or to the last place it stopped before. The run is the same each time, since every op and
 value comes from the journal; without real I/O it takes as long as the computation, a fraction of a
-second for a Waypoint app. Output that a run prints a second time stays silent. Back from an exception
+second for an Io app. Output that a run prints a second time stays silent. Back from an exception
 goes to the statement that threw. With `--request N` only the startup part and that request run again.
 The editor shows the usual stepping buttons for it.
 

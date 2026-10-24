@@ -1,0 +1,22 @@
+{
+    "name": "tenma/io-demo",
+    "description": "Io app as a demo for tenma: runs under tenma and unchanged under php -S or FPM",
+    "type": "project",
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../../../Leisenfeld Media/Systonia/Io/framework",
+            "options": {
+                "symlink": true
+            }
+        }
+    ],
+    "require": {
+        "io/framework": "*@dev"
+    },
+    "autoload": {
+        "psr-4": {
+            "Demo\\": "src/"
+        }
+    }
+}

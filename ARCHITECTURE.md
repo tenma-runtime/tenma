@@ -58,7 +58,7 @@ Everything else:
 | `tenma-plugin/`      | the C ABI of native plugins: `tenma_plugin.h` and the Rust crate of the same name |
 | `tests/plugins/echo` | the plugin of the test suite, in C, built by `cargo test`                         |
 | `php-build/build.sh` | builds PHP 8.5 as a static library (embed SAPI, ZTS) with its extensions          |
-| `demo/waypoint/`     | a Waypoint app that runs under tenma and unchanged under `php -S`                 |
+| `demo/io/`           | an Io app that runs under tenma and unchanged under `php -S`                      |
 | `tests/http.rs`      | starts the binary and sends real requests                                         |
 | `tests/lsp.rs`       | talks LSP to `tenma lsp` on `tests/fixtures/lsp`                                  |
 | `tests/docs.rs`      | runs `tenma docs` on `tests/fixtures/docs` and on tenma's own API                 |
@@ -117,7 +117,7 @@ Measured on an M-series Mac with `ab`.
 | What                                                      | Result                          |
 | --------------------------------------------------------- | ------------------------------- |
 | a simple handler, `ab -k`                                 | about 100,000 requests/s        |
-| Waypoint demo `GET /waypoints/1`, `ab -k`, 1 worker       | 55,000 requests/s               |
+| Io demo `GET /waypoints/1`, `ab -k`, 1 worker             | 55,000 requests/s               |
 | the same with 4 workers                                   | 165,000 requests/s              |
 | the same with 10 workers                                  | 192,000 requests/s              |
 | the same, 4 × `ab` in parallel                            | 207,000 requests/s at 570 % CPU |
@@ -129,7 +129,7 @@ Measured on an M-series Mac with `ab`.
 | 500 streams of 0.6 s each, 1 worker                       | about 780 streams/s, 58 MB      |
 | WebSocket echo, 1 connection                              | 46,000 round trips/s            |
 | WebSocket echo, 4 connections                             | about 118,000 round trips/s     |
-| 5 million requests against the Waypoint demo              | the process stays at 22.8 MB    |
+| 5 million requests against the Io demo                    | the process stays at 22.8 MB    |
 | 2.1 million requests with fibers and `fetch`              | 26.8 MB                         |
 
 - Without keep-alive, setting up connections and the single accepting thread are the limit.

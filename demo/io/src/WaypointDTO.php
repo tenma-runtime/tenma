@@ -1,9 +1,9 @@
 <?php
 
-namespace App;
+namespace Demo;
 
-use Waypoint\Attributes\{Length, NotBlank};
-use Waypoint\FromArray;
+use Io\Attributes\{Length, NotBlank};
+use Io\FromArray;
 
 class WaypointDTO
 {

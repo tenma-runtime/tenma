@@ -13,7 +13,7 @@ interface Provider
 
 What a package adds to `tenma lsp`, the language server that runs next to the editor's own
 PHP server. A package names its provider in composer.json, `"extra": {"tenma": {"lsp":
-"Waypoint\\View\\Editor"}}`; tenma creates it with the project's directory, in a process that loads
+"Io\\View\\Editor"}}`; tenma creates it with the project's directory, in a process that loads
 the project's autoloader. Files are absolute paths, offsets and texts are bytes: `$text` is
 the editor's content, saved or not.
 

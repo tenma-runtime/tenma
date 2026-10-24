@@ -107,7 +107,7 @@ jobs:
       - if: startsWith(github.ref, 'refs/tags/v')
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          image=ghcr.io/systonia/tenma:${GITHUB_REF_NAME#v}-${{ matrix.arch }}
+          image=ghcr.io/tenma-runtime/tenma:${GITHUB_REF_NAME#v}-${{ matrix.arch }}
           docker tag tenma "$image" && docker push "$image"
 
   # The .deb for Ubuntu 24.04 LTS, whose libraries (ICU 74) are older than Debian 13's
@@ -148,16 +148,16 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           version=${GITHUB_REF_NAME#v}
           for tag in "$version" latest; do
-            docker buildx imagetools create -t ghcr.io/systonia/tenma:$tag \
-              ghcr.io/systonia/tenma:$version-x64 ghcr.io/systonia/tenma:$version-arm64
+            docker buildx imagetools create -t ghcr.io/tenma-runtime/tenma:$tag \
+              ghcr.io/tenma-runtime/tenma:$version-x64 ghcr.io/tenma-runtime/tenma:$version-arm64
           done
       - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes tenma-*.tar.gz tenma_*.deb
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # systonia/Homebrew-Tap: GITHUB_TOKEN may only write this repo, TAP_TOKEN is a token with write access to the tap
+      # tenma-runtime/homebrew-tap: GITHUB_TOKEN may only write this repo, TAP_TOKEN is a token with write access to the tap
       - if: env.TAP_TOKEN != ''
         run: |
-          git clone "https://x-access-token:$TAP_TOKEN@github.com/systonia/Homebrew-Tap.git" tap
+          git clone "https://x-access-token:$TAP_TOKEN@github.com/tenma-runtime/homebrew-tap.git" tap
           mkdir -p tap/Formula && cp tenma.rb tap/Formula/tenma.rb
           cd tap
           git config user.name "github-actions[bot]"
@@ -165,7 +165,7 @@ jobs:
           git add Formula/tenma.rb
           git commit -m "feat(tenma): update to ${GITHUB_REF_NAME#v}"
           git push
-      # systonia/Tenma-Stubs at the same version, from the released image: STUBS_DEPLOY_KEY is a deploy key with write
+      # tenma-runtime/stubs at the same version, from the released image: STUBS_DEPLOY_KEY is a deploy key with write
       # access to that repo. GitHub's host key is pinned, from docs.github.com
       - if: env.STUBS_DEPLOY_KEY != ''
         run: |
@@ -174,10 +174,10 @@ jobs:
           echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> ~/.ssh/known_hosts
           eval "$(ssh-agent -s)"
           echo "$STUBS_DEPLOY_KEY" | ssh-add -
-          git clone git@github.com:systonia/Tenma-Stubs.git stubs
+          git clone git@github.com:tenma-runtime/stubs.git stubs
           # One file per class: the image writes into the checkout as the runner's user
           rm -rf stubs/src stubs/tenma.php
-          docker run --rm --user "$(id -u)" -v "$PWD/stubs:/stubs" ghcr.io/systonia/tenma:$version --stubs /stubs/src
+          docker run --rm --user "$(id -u)" -v "$PWD/stubs:/stubs" ghcr.io/tenma-runtime/tenma:$version --stubs /stubs/src
           cd stubs
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

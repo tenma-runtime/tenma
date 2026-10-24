@@ -5,7 +5,7 @@ edition = "2024"
 description = "PHP as a long-running process: the script runs once, then one event loop serves every request"
 license = "MIT OR Apache-2.0"
 homepage = "https://tenma.dev"
-repository = "https://github.com/systonia/Tenma"
+repository = "https://github.com/tenma-runtime/tenma"
 
 [dependencies]
 bytes = "1"

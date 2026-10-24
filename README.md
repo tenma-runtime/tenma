@@ -19,23 +19,23 @@ is built, measurements and known limits are in [ARCHITECTURE.md](ARCHITECTURE.md
 ## Install
 
 ```
-curl -fsSL https://raw.githubusercontent.com/systonia/Tenma/main/packaging/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tenma-runtime/tenma/main/packaging/install.sh | sh
 ```
 
 The script picks the way that fits your system:
 
-| System                 | By hand                                                                                 |
-| ---------------------- | --------------------------------------------------------------------------------------- |
-| macOS on Apple Silicon | `brew install systonia/tap/tenma`                                                       |
-| Debian 13              | `apt install ./tenma_<version>_amd64.deb` from the release                              |
-| Ubuntu 24.04           | `apt install ./tenma_<version>_ubuntu24.04_amd64.deb` from the release                  |
-| other Linux            | `tenma-linux-x64.tar.gz` from the [release](https://github.com/systonia/Tenma/releases) |
-| Docker                 | `docker run -p 8080:8080 -v "$PWD:/app" ghcr.io/systonia/tenma /app/index.php`          |
+| System                 | By hand                                                                                      |
+| ---------------------- | -------------------------------------------------------------------------------------------- |
+| macOS on Apple Silicon | `brew install tenma-runtime/tap/tenma`                                                       |
+| Debian 13              | `apt install ./tenma_<version>_amd64.deb` from the release                                   |
+| Ubuntu 24.04           | `apt install ./tenma_<version>_ubuntu24.04_amd64.deb` from the release                       |
+| other Linux            | `tenma-linux-x64.tar.gz` from the [release](https://github.com/tenma-runtime/tenma/releases) |
+| Docker                 | `docker run -p 8080:8080 -v "$PWD:/app" ghcr.io/tenma-runtime/tenma /app/index.php`          |
 
 The script installs the latest release. On Linux it can install an older one instead:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/systonia/Tenma/main/packaging/install.sh | TENMA_VERSION=0.1.17 sh
+curl -fsSL https://raw.githubusercontent.com/tenma-runtime/tenma/main/packaging/install.sh | TENMA_VERSION=0.1.17 sh
 ```
 
 Homebrew on macOS always installs the latest. `tenma --version` prints the tenma and PHP versions.

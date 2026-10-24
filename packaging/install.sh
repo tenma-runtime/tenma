@@ -1,17 +1,17 @@
 #!/bin/sh
-# Installs the latest tenma: curl -fsSL https://raw.githubusercontent.com/systonia/Tenma/main/packaging/install.sh | sh
+# Installs the latest tenma: curl -fsSL https://raw.githubusercontent.com/tenma-runtime/tenma/main/packaging/install.sh | sh
 # macOS through Homebrew (the binary links Homebrew's libraries), Debian 13 and Ubuntu 24.04 through their .deb,
 # any other Linux as the binary in ~/.local/bin (TENMA_DIR), with a list of the libraries it still misses.
 # TENMA_VERSION=0.1.2 installs that version on Linux.
 set -eu
-repo=systonia/Tenma
+repo=tenma-runtime/tenma
 fail() { echo "tenma: $*" >&2; exit 1; }
 
 case "$(uname -s)" in
   Darwin)
     [ "$(uname -m)" = arm64 ] || fail "only Apple Silicon Macs are supported"
-    command -v brew >/dev/null || fail "needs Homebrew (https://brew.sh), then: brew install systonia/tap/tenma"
-    exec brew install systonia/tap/tenma
+    command -v brew >/dev/null || fail "needs Homebrew (https://brew.sh), then: brew install tenma-runtime/tap/tenma"
+    exec brew install tenma-runtime/tap/tenma
     ;;
   Linux) ;;
   *) fail "$(uname -s) is not supported" ;;
@@ -50,7 +50,7 @@ else
   rm -f "$dir/tenma" && cp "$temp/tenma" "$dir/tenma"
   missing=$(ldd "$dir/tenma" 2>/dev/null | sed -n 's/^[[:space:]]*\([^ ]*\) => not found/\1/p')
   case ":$PATH:" in *":$dir:"*) ;; *) echo "tenma: add $dir to your PATH" >&2 ;; esac
-  [ -z "$missing" ] || fail "installed in $dir, but these libraries are missing (or use the Docker image ghcr.io/systonia/tenma):" $missing
+  [ -z "$missing" ] || fail "installed in $dir, but these libraries are missing (or use the Docker image ghcr.io/tenma-runtime/tenma):" $missing
   "$dir/tenma" --version
   exit
 fi

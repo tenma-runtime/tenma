@@ -87,10 +87,10 @@ To deploy without dropping requests, start the new release on another port, swit
 
 ## Docker
 
-The image `ghcr.io/systonia/tenma` runs `tenma` as its entrypoint. It runs as the unprivileged user `tenma` (uid 1000), sets `PORT=8080` and stops with SIGTERM:
+The image `ghcr.io/tenma-runtime/tenma` runs `tenma` as its entrypoint. It runs as the unprivileged user `tenma` (uid 1000), sets `PORT=8080` and stops with SIGTERM:
 
 ```bash
-docker run -p 8080:8080 -v "$PWD:/app" ghcr.io/systonia/tenma /app/index.php
+docker run -p 8080:8080 -v "$PWD:/app" ghcr.io/tenma-runtime/tenma /app/index.php
 ```
 
 A production image for an app:
@@ -101,7 +101,7 @@ WORKDIR /app
 COPY composer.json composer.lock ./
 RUN composer install --no-dev --classmap-authoritative --no-scripts
 
-FROM ghcr.io/systonia/tenma
+FROM ghcr.io/tenma-runtime/tenma
 WORKDIR /app
 COPY --from=vendor /app/vendor vendor
 COPY . .
@@ -149,7 +149,7 @@ WantedBy=multi-user.target
 On macOS (Apple Silicon):
 
 ```bash
-brew install systonia/tap/tenma
+brew install tenma-runtime/tap/tenma
 brew upgrade tenma
 ```
 

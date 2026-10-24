@@ -107,7 +107,7 @@ requests run one after another, and functions that wait throw.
 ## Releases
 
 A tag `v*` builds the binaries for macOS arm64 and Linux x64 and arm64 as a GitHub release, and the
-image `ghcr.io/systonia/tenma` (`.github/workflows/build.yml`). The Linux binaries link the libraries of
+image `ghcr.io/tenma-runtime/tenma` (`.github/workflows/build.yml`). The Linux binaries link the libraries of
 Debian 13. On another distribution, use the image.
 
 ## Measurements

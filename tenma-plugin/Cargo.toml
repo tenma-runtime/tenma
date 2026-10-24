@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2024"
 description = "The C ABI of tenma's native plugins, as Rust types, with safe wrappers for plugin authors"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/systonia/Tenma"
+repository = "https://github.com/tenma-runtime/tenma"
 
 [dependencies]

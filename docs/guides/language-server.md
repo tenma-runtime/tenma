@@ -20,7 +20,7 @@ Out of the box it shows the problems a running app reports with [`Development\Pr
 
 ## Editor setup
 
-**VS Code and VSCodium**: the [Tenma-VSCode](https://github.com/systonia/Tenma-VSCode) extension starts `tenma lsp` for PHP files in trusted workspaces.
+**VS Code and VSCodium**: the [Tenma-VSCode](https://github.com/tenma-runtime/vscode) extension starts `tenma lsp` for PHP files in trusted workspaces.
 
 | Setting            | Default | Does                            |
 | ------------------ | ------- | ------------------------------- |

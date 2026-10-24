@@ -8,7 +8,7 @@ cat <<RUBY
 class Tenma < Formula
   desc "PHP as a long-running process: the script runs once, then one event loop serves every request"
   homepage "https://tenma.dev"
-  url "https://github.com/systonia/Tenma/releases/download/v$version/$(basename "$tarball")"
+  url "https://github.com/tenma-runtime/tenma/releases/download/v$version/$(basename "$tarball")"
   version "$version"
   sha256 "$sha256"
   license any_of: ["MIT", "Apache-2.0"]

@@ -27,7 +27,7 @@ tenma --inspect --watch index.php  # keeps the editor connected across reloads
 
 ## VS Code and VSCodium
 
-Install the [Tenma-VSCode](https://github.com/systonia/Tenma-VSCode) extension. It starts the script on F5, or attaches to a running `--inspect`. It also starts the [language server](language-server.md). A `.vscode/launch.json`:
+Install the [Tenma-VSCode](https://github.com/tenma-runtime/vscode) extension. It starts the script on F5, or attaches to a running `--inspect`. It also starts the [language server](language-server.md). A `.vscode/launch.json`:
 
 ```json
 {

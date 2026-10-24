@@ -11,17 +11,17 @@ Tenma is a single binary with PHP 8.5 (ZTS) and its usual extensions built in. I
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/systonia/Tenma/main/packaging/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tenma-runtime/tenma/main/packaging/install.sh | sh
 ```
 
 The script installs the Homebrew formula on macOS (Apple Silicon), a `.deb` on Debian 13 and Ubuntu 24.04, and the plain binary in `~/.local/bin` on other Linux systems. To install by hand:
 
-| System                  | Command                                                                                                  |
-| ----------------------- | -------------------------------------------------------------------------------------------------------- |
-| macOS on Apple Silicon  | `brew install systonia/tap/tenma`                                                                        |
-| Debian 13, Ubuntu 24.04 | `apt install ./tenma_<version>_amd64.deb` from the [release](https://github.com/systonia/Tenma/releases) |
-| other Linux             | `tenma-linux-x64.tar.gz` from the release, binary into `~/.local/bin`                                    |
-| Docker                  | `docker run -p 8080:8080 -v "$PWD:/app" ghcr.io/systonia/tenma /app/index.php`                           |
+| System                  | Command                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------- |
+| macOS on Apple Silicon  | `brew install tenma-runtime/tap/tenma`                                                                        |
+| Debian 13, Ubuntu 24.04 | `apt install ./tenma_<version>_amd64.deb` from the [release](https://github.com/tenma-runtime/tenma/releases) |
+| other Linux             | `tenma-linux-x64.tar.gz` from the release, binary into `~/.local/bin`                                         |
+| Docker                  | `docker run -p 8080:8080 -v "$PWD:/app" ghcr.io/tenma-runtime/tenma /app/index.php`                           |
 
 `tenma --version` prints the Tenma and PHP versions.
 

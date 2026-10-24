@@ -122,7 +122,7 @@ Rules when moving code to fiber mode:
 
 ## Integrations
 
-A PSR-15 app runs in fiber mode through [tenma/psr](https://github.com/systonia/Tenma-PSR):
+A PSR-15 app runs in fiber mode through [tenma/psr](https://github.com/tenma-runtime/psr):
 
 ```php
 new Http\Server(3000, Tenma\Psr\Psr::handler($app, new Nyholm\Psr7\Factory\Psr17Factory()))->start();

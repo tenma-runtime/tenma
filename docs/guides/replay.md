@@ -33,8 +33,12 @@ stays, and every file with a failure; with `--record-on error` the others go.
 | `--record-max-body SIZE`     | `1m`    | request bodies and op results above this are cut; the request is marked not replayable |
 | `--record-redact HEADER,...` | none    | replaces these request headers with `[redacted]`                                       |
 
-A journal holds request headers, cookies and query results: it is as secret as the traffic itself.
-Keep the directory out of the repository and of reach.
+A journal holds the environment (`DATABASE_URL`, API keys), request headers and cookies, request
+bodies and query results: treat it like a database dump with the `.env` beside it. Tenma creates the
+files readable by their owner only (0600) and a new directory with 0700. Keep the directory out of the
+repository, and remove secrets before a journal leaves the server. `--record-redact` keeps headers
+out of the journal, but a request without its cookie or `Authorization` header no longer replays
+exactly.
 
 ## Replay
 

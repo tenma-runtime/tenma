@@ -55,8 +55,10 @@ public function subscribe(callable $callback): \Messaging\Subscription
 ```
 
 Calls $callback with every message published to the channel, in its own Fiber, until cancel().
-Works at script startup and in asynchronous code; made in a request, it ends with the request,
-for WebSockets and streams with the connection. Keeps a script without a server alive.
+One message at a time and in order: the next call waits for the last one. A subscription that
+falls 1024 messages behind misses the newer ones. Works at script startup and in asynchronous
+code; made in a request, it ends with the request, for WebSockets and streams with the
+connection. Keeps a script without a server alive.
 
 **Parameters**
 

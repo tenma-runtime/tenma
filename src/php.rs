@@ -72,6 +72,7 @@ unsafe extern "C" {
     fn tenma_handle(handler: u32, rid: u64, request: *const RawRequest) -> c_int;
     fn tenma_response_free(response: *mut RawResponse);
     fn tenma_complete_null(op: u64) -> c_int;
+    fn tenma_memory_room() -> usize;
     fn tenma_request_gone(rid: u64) -> c_int;
     fn tenma_complete_string(op: u64, text: *const u8, len: usize) -> c_int;
     fn tenma_complete_error(op: u64, message: *const u8, len: usize, code: c_int) -> c_int;
@@ -124,6 +125,12 @@ pub fn next_id() -> u64 {
 /// PHP runs on this thread.
 pub fn current_request() -> u64 {
     unsafe { tenma_current_request() }
+}
+
+/// The bytes a result may still have so that it fits under memory_limit. Only while PHP runs on this
+/// thread.
+pub fn memory_room() -> usize {
+    unsafe { tenma_memory_room() }
 }
 
 /// A replay gives requests and ops the IDs the journal recorded.

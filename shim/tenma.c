@@ -1269,6 +1269,30 @@ static void wrap_stream_select(void) {
     }
 }
 
+/**
+ * session_start() only inside a classic request. In fiber mode one worker serves many visitors at
+ * once and there is no session cookie: the session would pass from one visitor to the next.
+ */
+static zif_handler original_session_start = NULL;
+
+static ZEND_NAMED_FUNCTION(tenma_session_start) {
+    if (!classic_open) {
+        zend_throw_error(
+            NULL, "session_start() works only in classic mode: in fiber mode visitors would share one session"
+        );
+        RETURN_THROWS();
+    }
+    original_session_start(INTERNAL_FUNCTION_PARAM_PASSTHRU);
+}
+
+static void wrap_session_start(void) {
+    zend_function *function = zend_hash_str_find_ptr(CG(function_table), "session_start", strlen("session_start"));
+    if (function != NULL && function->type == ZEND_INTERNAL_FUNCTION) {
+        original_session_start = function->internal_function.handler;
+        function->internal_function.handler = tenma_session_start;
+    }
+}
+
 /* ---------------------------------------------------------------------------------------------------
  * The PDO driver "pgsql" of tenma, on tokio-postgres (src/pdo.rs) instead of libpq: inside a fiber a
  * query suspends only the fiber. It takes the place of ext/pdo_pgsql unless --pdo-pgsql native is given.
@@ -2215,11 +2239,27 @@ static ZEND_NAMED_FUNCTION(journaled_function) {
         size_t len;
         if (tenma_rs_journal_take(ZSTR_VAL(name), ZSTR_LEN(name), &value, &len)) {
             const unsigned char *p = (const unsigned char *) value;
+            // A journal may come from a database others can write: only the class the function
+            // returns, so a stored object cannot run code of its own
+            HashTable allowed;
+            zend_hash_init(&allowed, 1, NULL, NULL, 0);
+            if (zend_string_equals_literal(name, "date_create")) {
+                zend_hash_str_add_empty_element(&allowed, ZEND_STRL("datetime"));
+            } else if (zend_string_equals_literal(name, "date_create_immutable")) {
+                zend_hash_str_add_empty_element(&allowed, ZEND_STRL("datetimeimmutable"));
+            }
             php_unserialize_data_t var_hash;
             PHP_VAR_UNSERIALIZE_INIT(var_hash);
+            php_var_unserialize_set_allowed_classes(var_hash, &allowed);
             int ok = php_var_unserialize(return_value, &p, p + len, &var_hash);
             PHP_VAR_UNSERIALIZE_DESTROY(var_hash);
+            zend_hash_destroy(&allowed);
             tenma_rs_journal_free(value, len);
+            // Any other class arrives as __PHP_Incomplete_Class: not a value the function returns
+            if (ok && Z_TYPE_P(return_value) == IS_OBJECT
+                && zend_string_equals_literal_ci(Z_OBJCE_P(return_value)->name, "__PHP_Incomplete_Class")) {
+                ok = 0;
+            }
             if (ok) {
                 return;
             }
@@ -2270,6 +2310,7 @@ int tenma_start(void) {
     wrap_exit();
     register_async_transports();
     wrap_stream_select();
+    wrap_session_start();
     register_pdo_driver();
     wrap_journaled();
     return 0;
@@ -4018,6 +4059,15 @@ int tenma_complete_null(uint64_t op) {
  */
 static int too_big(size_t len) {
     return PG(memory_limit) > 0 && zend_memory_usage(1) + len + (1 << 20) > (size_t) PG(memory_limit);
+}
+
+/** The bytes a result may still have so that it fits under memory_limit; SIZE_MAX without a limit. */
+size_t tenma_memory_room(void) {
+    if (PG(memory_limit) <= 0) {
+        return SIZE_MAX;
+    }
+    size_t used = zend_memory_usage(1) + (1 << 20);
+    return used < (size_t) PG(memory_limit) ? (size_t) PG(memory_limit) - used : 0;
 }
 
 int tenma_complete_error(uint64_t op, const char *message, size_t len, int code) {

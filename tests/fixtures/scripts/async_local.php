@@ -29,3 +29,11 @@ $request = function (string $name) use ($id): Threading\Task {
     [$a, $b] = \Threading\Task::all($request('a'), $request('b'));
     echo json_encode([$a, $b, $id->get()]), "\n";
 });
+
+// A custom Fiber has no task to hold the value
+$fiber = new Fiber(fn () => $id->set('fiber'));
+try {
+    $fiber->start();
+} catch (LogicException) {
+    echo "custom fiber refused, still {$id->get()}\n";
+}

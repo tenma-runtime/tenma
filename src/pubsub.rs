@@ -14,16 +14,21 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::mpsc::{
+    Receiver as Queue, Sender, UnboundedReceiver, UnboundedSender, unbounded_channel,
+};
 
 use crate::ops;
 use crate::php::{OpResult, bytes};
 
-type Receiver = Rc<RefCell<Option<UnboundedReceiver<Vec<u8>>>>>;
+type Receiver = Rc<RefCell<Option<Queue<Vec<u8>>>>>;
+
+/// Messages a subscription holds that its callback has not taken yet; beyond them new ones are dropped.
+const QUEUED: usize = 1024;
 
 /// Every subscription of the process by channel: its ID and where its messages go.
-// ponytail: unbounded per subscription; a callback slower than the publishers lets its queue grow
-static CHANNELS: LazyLock<Mutex<HashMap<Vec<u8>, Vec<(u64, UnboundedSender<Vec<u8>>)>>>> =
+static CHANNELS: LazyLock<Mutex<HashMap<Vec<u8>, Vec<(u64, Sender<Vec<u8>>)>>>> =
     LazyLock::new(Mutex::default);
 /// Unique across workers: unsubscribe finds the subscription in CHANNELS by it.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -43,7 +48,7 @@ thread_local! {
     static SUBSCRIPTIONS: RefCell<HashMap<u64, (Vec<u8>, Receiver)>> = RefCell::new(HashMap::new());
 }
 
-fn channels() -> MutexGuard<'static, HashMap<Vec<u8>, Vec<(u64, UnboundedSender<Vec<u8>>)>>> {
+fn channels() -> MutexGuard<'static, HashMap<Vec<u8>, Vec<(u64, Sender<Vec<u8>>)>>> {
     CHANNELS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -71,8 +76,14 @@ fn publish(channel: &[u8], message: &[u8]) {
 pub fn deliver(channel: &[u8], message: &[u8]) {
     let mut channels = channels();
     if let Some(subscriptions) = channels.get_mut(channel) {
-        // A worker that went away without unsubscribing (restart after a fatal error) closed its receivers
-        subscriptions.retain(|(_, sender)| sender.send(message.to_vec()).is_ok());
+        // A worker that went away without unsubscribing (restart after a fatal error) closed its
+        // receivers; a subscription whose callback lags QUEUED messages behind misses this one
+        subscriptions.retain(|(_, sender)| {
+            !matches!(
+                sender.try_send(message.to_vec()),
+                Err(TrySendError::Closed(_))
+            )
+        });
         if subscriptions.is_empty() {
             channels.remove(channel);
             tell_redis(Command::Unsubscribe(channel.to_vec()));
@@ -82,7 +93,7 @@ pub fn deliver(channel: &[u8], message: &[u8]) {
 
 fn subscribe(channel: &[u8]) -> u64 {
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    let (sender, receiver) = unbounded_channel();
+    let (sender, receiver) = tokio::sync::mpsc::channel(QUEUED);
     {
         let mut channels = channels();
         let subscriptions = channels.entry(channel.to_vec()).or_default();
@@ -146,7 +157,7 @@ fn receive(id: u64) -> u64 {
 /// A receiver taken out for one receive(): goes back when the op ends, also when it is cancelled.
 struct Lent {
     slot: Receiver,
-    receiver: Option<UnboundedReceiver<Vec<u8>>>,
+    receiver: Option<Queue<Vec<u8>>>,
 }
 
 impl Drop for Lent {

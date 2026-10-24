@@ -529,6 +529,42 @@ fn sessions_per_visitor_without_leaks() {
 }
 
 #[test]
+fn fiber_mode_refuses_sessions() {
+    let port = 18_196;
+    let _server = Server(
+        Command::new(env!("CARGO_BIN_EXE_tenma"))
+            .arg("tests/fixtures/session_fiber.php")
+            .env("PORT", port.to_string())
+            .spawn()
+            .unwrap(),
+    );
+
+    let response = get(port, "/");
+    assert!(
+        response.ends_with("visitors would share one session"),
+        "{response}"
+    );
+    assert!(!response.contains("set-cookie"), "{response}");
+}
+
+#[test]
+fn classic_requests_do_not_leave_async_local_values() {
+    let port = 18_197;
+    let _server = Server(
+        Command::new(env!("CARGO_BIN_EXE_tenma"))
+            .arg("tests/fixtures/classic_async_local.php")
+            .env("PORT", port.to_string())
+            .spawn()
+            .unwrap(),
+    );
+
+    assert!(get(port, "/?set=alice").ends_with("script"));
+    assert!(get(port, "/").ends_with("script"));
+    assert!(get(port, "/?fiber=1").ends_with("script"));
+    assert!(get(port, "/").ends_with("script"));
+}
+
+#[test]
 fn built_in_extensions_work() {
     let output = Command::new(env!("CARGO_BIN_EXE_tenma"))
         .arg("tests/fixtures/extensions.php")
@@ -1929,8 +1965,26 @@ fn async_local_travels_with_tasks() {
         "{stdout}"
     );
     assert!(
-        stdout.ends_with("[[\"a\",\"a\",\"a\",null],[\"b\",\"b\",\"b\",null],\"script\"]\n"),
+        stdout.contains("[[\"a\",\"a\",\"a\",null],[\"b\",\"b\",\"b\",null],\"script\"]\n"),
         "{stdout}"
+    );
+    assert!(
+        stdout.contains("custom fiber refused, still script\n"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn slow_subscriptions_take_one_message_at_a_time() {
+    let output = Command::new(env!("CARGO_BIN_EXE_tenma"))
+        .arg("tests/fixtures/scripts/subscription_load.php")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(r#"{"most":1,"ordered":true,"dropped":true,"first":0}"#),
+        "{stdout}{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
@@ -3844,6 +3898,69 @@ fn tls_options_are_checked_at_the_start() {
 }
 
 #[test]
+fn fetch_stops_at_memory_limit() {
+    let port = 18_199;
+    let source = 18_200;
+    // 200 MB, once with Content-Length and once without: neither may be buffered whole
+    let listener = std::net::TcpListener::bind(("127.0.0.1", source)).unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            std::thread::spawn(move || {
+                let mut head = [0; 1024];
+                let read = stream.read(&mut head).unwrap();
+                let length = if String::from_utf8_lossy(&head[..read]).starts_with("GET /length") {
+                    "Content-Length: 209715200\r\n"
+                } else {
+                    ""
+                };
+                let head = format!("HTTP/1.1 200 OK\r\n{length}Connection: close\r\n\r\n");
+                let _ = stream.write_all(head.as_bytes());
+                let chunk = vec![b'x'; 1 << 20];
+                for _ in 0..200 {
+                    if stream.write_all(&chunk).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+    });
+    let directory = scratch("fetch-limit");
+    let app = directory.join("app.php");
+    std::fs::write(
+        &app,
+        format!(
+            r#"<?php
+(new \Http\Server({port}, function ($request) {{
+    try {{
+        (new \Http\Client())->get('http://127.0.0.1:{source}' . $request->path);
+        return "no error\n";
+    }} catch (RuntimeException $error) {{
+        return $error->getMessage() . "\n";
+    }}
+}}))->start();
+"#
+        ),
+    )
+    .unwrap();
+    let _server = Server(
+        Command::new(env!("CARGO_BIN_EXE_tenma"))
+            .args(["-d", "memory_limit=64M"])
+            .arg(&app)
+            .spawn()
+            .unwrap(),
+    );
+
+    for path in ["/length", "/stream"] {
+        let response = get(port, path);
+        assert!(
+            response.ends_with("the response does not fit under memory_limit\n"),
+            "{response}"
+        );
+    }
+}
+
+#[test]
 fn fetch_errors_name_their_cause() {
     let port = 18_174;
     let directory = scratch("fetch-errors");
@@ -4035,8 +4152,63 @@ fn https_speaks_http2_when_the_client_offers_it() {
     let _ = std::fs::remove_dir_all(directory);
 }
 
-/// Two requests as streams of one HTTP/2 connection, sent together; their bodies and the time both took.
-async fn http2_get_both(port: u16) -> (Vec<String>, Duration) {
+#[test]
+fn http2_streams_share_the_body_limit() {
+    let port = 18_198;
+    let directory = scratch("http2-body");
+    let app = directory.join("app.php");
+    std::fs::write(
+        &app,
+        format!(
+            "<?php\n(new \\Http\\Server({port}, fn ($request) => strlen($request->body) . \"\\n\"))->start();\n"
+        ),
+    )
+    .unwrap();
+    let _server = Server(
+        Command::new(env!("CARGO_BIN_EXE_tenma"))
+            .args([
+                "--max-body",
+                "1000",
+                "--tls-cert",
+                "tests/fixtures/tls/cert.pem",
+                "--tls-key",
+                "tests/fixtures/tls/key.pem",
+            ])
+            .arg(&app)
+            .spawn()
+            .unwrap(),
+    );
+    assert!(get_tls(port, "/").ends_with("\r\n\r\n0\n"));
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let statuses = runtime.block_on(async {
+        let mut client = http2_connect(port).await;
+        let post = || {
+            hyper::Request::post(format!("https://localhost:{port}/"))
+                .body(())
+                .unwrap()
+        };
+        // The first stream holds 600 bytes and is not done; 600 more on a second stream pass the limit
+        let (first, mut first_body) = client.send_request(post(), false).unwrap();
+        first_body.send_data(vec![b'a'; 600].into(), false).unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let (second, mut second_body) = client.send_request(post(), false).unwrap();
+        second_body.send_data(vec![b'b'; 600].into(), true).unwrap();
+        let second = second.await.unwrap().status();
+        first_body.send_data(vec![b'a'; 100].into(), true).unwrap();
+        let first = first.await.unwrap().status();
+        (first, second)
+    });
+    assert_eq!(statuses.0, 200);
+    assert_eq!(statuses.1, 413);
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+/// An HTTP/2 connection to the test server, ready for requests.
+async fn http2_connect(port: u16) -> h2::client::SendRequest<bytes::Bytes> {
     use rustls::pki_types::CertificateDer;
     use rustls::pki_types::pem::PemObject;
 
@@ -4062,7 +4234,12 @@ async fn http2_get_both(port: u16) -> (Vec<String>, Duration) {
 
     let (client, connection) = h2::client::handshake(stream).await.unwrap();
     tokio::spawn(connection);
-    let mut client = client.ready().await.unwrap();
+    client.ready().await.unwrap()
+}
+
+/// Two requests as streams of one HTTP/2 connection, sent together; their bodies and the time both took.
+async fn http2_get_both(port: u16) -> (Vec<String>, Duration) {
+    let mut client = http2_connect(port).await;
 
     let started = Instant::now();
     let mut responses = Vec::new();
@@ -4337,6 +4514,12 @@ fn record_journal(port: u16, directory: &std::path::Path, extra: &[&str]) -> std
             .any(|data| String::from_utf8_lossy(data).contains("boom")),
         "the journal is not written yet"
     );
+    // Only the owner reads journals: they hold the environment and every request
+    for entry in std::fs::read_dir(directory).unwrap().flatten() {
+        let mode =
+            std::os::unix::fs::PermissionsExt::mode(&entry.metadata().unwrap().permissions());
+        assert_eq!(mode & 0o777, 0o600, "{}", entry.path().display());
+    }
     // SIGTERM: the worker closes its journal with the list of files
     unsafe { libc::kill(server.0.id() as i32, libc::SIGTERM) };
     let _ = server.0.wait();
@@ -4391,18 +4574,7 @@ fn replay_plays_a_recorded_journal_again() {
             .replace("Task::delay(0.05)", "Task::delay(0.07)"),
     )
     .unwrap();
-    let data = std::fs::read(&journal).unwrap();
-    let length = u32::from_le_bytes(data[1..5].try_into().unwrap()) as usize;
-    let header_length = u32::from_le_bytes(data[5..9].try_into().unwrap()) as usize;
-    let mut header: serde_json::Value =
-        serde_json::from_slice(&data[9..9 + header_length]).unwrap();
-    header["script"] = serde_json::Value::String(changed.to_str().unwrap().into());
-    let json = header.to_string();
-    let mut patched = vec![1u8];
-    patched.extend_from_slice(&((json.len() + 4) as u32).to_le_bytes());
-    patched.extend_from_slice(&(json.len() as u32).to_le_bytes());
-    patched.extend_from_slice(json.as_bytes());
-    patched.extend_from_slice(&data[5 + length..]);
+    let patched = with_script(&std::fs::read(&journal).unwrap(), &changed);
     let diverging = directory.join("changed.trace");
     std::fs::write(&diverging, patched).unwrap();
     let (status, log) = replay(&diverging, &["--check"]);
@@ -4417,6 +4589,58 @@ fn replay_plays_a_recorded_journal_again() {
         log.contains("file(s) differ from the recording") || log.contains("diverged"),
         "{log}"
     );
+}
+
+/// A journal whose header names another script.
+fn with_script(data: &[u8], script: &std::path::Path) -> Vec<u8> {
+    let length = u32::from_le_bytes(data[1..5].try_into().unwrap()) as usize;
+    let header_length = u32::from_le_bytes(data[5..9].try_into().unwrap()) as usize;
+    let mut header: serde_json::Value =
+        serde_json::from_slice(&data[9..9 + header_length]).unwrap();
+    header["script"] = serde_json::Value::String(script.to_str().unwrap().into());
+    let json = header.to_string();
+    let mut patched = vec![1u8];
+    patched.extend_from_slice(&((json.len() + 4) as u32).to_le_bytes());
+    patched.extend_from_slice(&(json.len() as u32).to_le_bytes());
+    patched.extend_from_slice(json.as_bytes());
+    patched.extend_from_slice(&data[5 + length..]);
+    patched
+}
+
+#[test]
+fn replay_does_not_wake_objects_from_the_journal() {
+    let port = 18_201;
+    let directory = scratch("journal-gadget");
+    let journal = record_journal(port, &directory, &[]);
+
+    // The script now has a class that acts when unserialized; the journal's uniqid() value becomes one
+    let marker = directory.join("woken");
+    let script = directory.join("gadget.php");
+    std::fs::write(
+        &script,
+        std::fs::read_to_string("tests/fixtures/journal.php").unwrap()
+            + &format!(
+                "\nclass Gadget123 {{ public function __wakeup() {{ touch('{}'); }} }}\n",
+                marker.display()
+            ),
+    )
+    .unwrap();
+    let mut data = with_script(&std::fs::read(&journal).unwrap(), &script);
+    let value = data
+        .windows(21)
+        .position(|window| {
+            window.starts_with(b"s:13:\"")
+                && window.ends_with(b"\";")
+                && window[6..19].iter().all(u8::is_ascii_hexdigit)
+        })
+        .expect("no uniqid() value in the journal");
+    data[value..value + 21].copy_from_slice(b"O:9:\"Gadget123\":0:{};");
+    let patched = directory.join("gadget.trace");
+    std::fs::write(&patched, data).unwrap();
+
+    let (_, log) = replay(&patched, &[]);
+    assert!(!marker.exists(), "{log}");
+    let _ = std::fs::remove_dir_all(directory);
 }
 
 #[test]

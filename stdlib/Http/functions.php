@@ -169,6 +169,7 @@ function startClassic(array $server, Request $request, int $rid): void
     }
 
     \Tenma\Internal\Current::$classic = $rid;
+    \Tenma\Internal\Current::$scriptContext = \Tenma\Internal\Scheduler::$rootContext;
     // From here on Tenma collects everything PHP outputs, even through flushed output buffers
     \tenma_classic_begin();
 }
@@ -199,6 +200,7 @@ function finishClassic(bool $fatal): void
     $failed = \Tenma\Internal\Current::$failed;
     \Tenma\Internal\Current::$classic = null;
     \Tenma\Internal\Current::$failed = false;
+    \Tenma\Internal\Scheduler::$rootContext = \Tenma\Internal\Current::$scriptContext;
     $body = \tenma_take_output();
     endSession();
 

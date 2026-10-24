@@ -12,4 +12,11 @@ final class Current
     public static ?int $classic = null;
     /** The classic request ended with an exception. */
     public static bool $failed = false;
+    /**
+     * The Threading\AsyncLocal values from the script: a classic request sets them without a task, and
+     * they come back after it, so the next request starts without them.
+     *
+     * @var array<int, mixed>
+     */
+    public static array $scriptContext = [];
 }

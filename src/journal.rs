@@ -14,6 +14,7 @@
 
 use std::cell::RefCell;
 use std::io::Write;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 
 use crate::php::{OpResult, bytes};
 
@@ -597,19 +598,31 @@ pub fn header(argv: &[String], watch: bool) -> String {
     .to_string()
 }
 
+/// A journal file only its owner can read: it holds the environment, headers and bodies.
+fn create(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+}
+
 /// Opens this worker's journal for a new interpreter life.
 pub fn start(settings: &Settings, worker: usize, header: String) -> Result<(), String> {
     let started = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_millis());
-    std::fs::create_dir_all(&settings.directory)
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&settings.directory)
         .map_err(|error| format!("--record {}: {error}", settings.directory.display()))?;
     let base = settings
         .directory
         .join(format!("{}-{worker}-{started}", std::process::id()));
     let path = base.with_extension("trace");
-    let file =
-        std::fs::File::create(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let file = create(&path).map_err(|error| format!("{}: {error}", path.display()))?;
     let mut recorder = Recorder {
         file: std::io::BufWriter::new(file),
         path,
@@ -670,7 +683,7 @@ impl Recorder {
             self.part
         );
         self.path = self.base.with_file_name(name);
-        let Ok(file) = std::fs::File::create(&self.path) else {
+        let Ok(file) = create(&self.path) else {
             return;
         };
         self.file = std::io::BufWriter::new(file);

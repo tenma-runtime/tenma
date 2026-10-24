@@ -234,8 +234,10 @@ extern "C" fn tenma_rs_fetch(
         }
         request
     };
+    // The body stops where it would no longer fit under memory_limit, before Rust holds all of it
+    let room = php::memory_room();
     spawn("fetch", detail, async move {
-        let response = match request.send().await {
+        let mut response = match request.send().await {
             Ok(response) => response,
             Err(error) => return OpResult::Error(fetch_error(&error, timeout_ms)),
         };
@@ -245,13 +247,26 @@ extern "C" fn tenma_rs_fetch(
             .iter()
             .map(|(name, value)| format!("{}: {}", name, String::from_utf8_lossy(value.as_bytes())))
             .collect();
-        match response.bytes().await {
-            Ok(body) => OpResult::Http {
-                status,
-                headers,
-                body: body.to_vec(),
-            },
-            Err(error) => OpResult::Error(fetch_error(&error, timeout_ms)),
+        let too_big = || OpResult::Error("the response does not fit under memory_limit".into());
+        if response
+            .content_length()
+            .is_some_and(|length| length > room as u64)
+        {
+            return too_big();
+        }
+        let mut body = Vec::new();
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) if body.len() + chunk.len() > room => return too_big(),
+                Ok(Some(chunk)) => body.extend_from_slice(&chunk),
+                Ok(None) => break,
+                Err(error) => return OpResult::Error(fetch_error(&error, timeout_ms)),
+            }
+        }
+        OpResult::Http {
+            status,
+            headers,
+            body,
         }
     })
 }

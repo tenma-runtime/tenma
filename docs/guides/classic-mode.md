@@ -94,6 +94,7 @@ During and after every request:
 - `session_start()` and `$_SESSION` work as usual. `$_SESSION` exists only after `session_start()`.
 - At the end of every request Tenma writes and closes the session and forgets its ID. No visitor sees the previous visitor's session.
 - With several workers, all share the session files. Concurrent requests of one session wait for the file lock, as under FPM.
+- In fiber mode `session_start()` throws: one worker serves many visitors at once, and they would share one session.
 
 ## Behaviour
 

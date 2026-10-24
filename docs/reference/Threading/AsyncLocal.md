@@ -14,7 +14,8 @@ final class AsyncLocal
 A value that travels along with asynchronous work, for example the
 request ID for log lines. Every task (Task::run(), all(), detach(), timer) gets a copy of its creator's
 values at start; set() in the task changes only its own copy and that of its later children. A request
-starts with the values from the script.
+starts with the values from the script; what a classic request sets ends with it. In a custom Fiber
+set() throws LogicException.
 
 **Template parameters**
 

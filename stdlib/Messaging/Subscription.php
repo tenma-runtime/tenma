@@ -37,16 +37,25 @@ final class Subscription
         }
     }
 
-    /** @internal A message came: the callback runs in its own Fiber, the next wait starts right away. */
+    /**
+     * @internal A message came: the callback runs in its own Fiber, and the next wait starts once it is
+     * done. Messages stay in order, and a slow callback holds one message, not one Fiber per message.
+     */
     public function fire(bool $ok, mixed $message): void
     {
         $this->op = 0;
         if ($this->cancelled || !$ok || !is_string($message)) {
             return;
         }
-        $this->arm();
         $callback = $this->callback;
-        \Threading\Task::start(static fn () => $callback($message), null, $this->context, 'Subscription');
+        $arm = $this->arm(...);
+        \Threading\Task::start(static function () use ($callback, $message, $arm): void {
+            try {
+                $callback($message);
+            } finally {
+                $arm();
+            }
+        }, null, $this->context, 'Subscription');
     }
 
     /** Stops the subscription; callbacks already running run to completion. */

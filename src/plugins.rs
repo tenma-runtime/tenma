@@ -5,7 +5,7 @@
 //! A plugin lives as long as the process: it survives worker restarts and --watch reloads.
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use tokio::sync::{mpsc, oneshot};
@@ -67,6 +67,9 @@ struct Adopted {
 }
 
 static ADOPTED: Mutex<Option<std::collections::HashMap<u64, Adopted>>> = Mutex::new(None);
+
+/// Connection IDs count for the whole process: request IDs count per worker and would collide.
+static NEXT_CONN: AtomicU64 = AtomicU64::new(1);
 
 fn adopted<T>(f: impl FnOnce(&mut std::collections::HashMap<u64, Adopted>) -> T) -> T {
     let mut guard = ADOPTED.lock().unwrap();
@@ -341,8 +344,8 @@ extern "C" fn tenma_rs_plugin_await(
     })
 }
 
-/// `tenma_plugin_adopt`: hands the WebSocket of request `rid` to the plugin. The connection ID, or 0
-/// with the reason in the log.
+/// `tenma_plugin_adopt`: hands the WebSocket of request `rid` to the plugin. The connection ID, unique
+/// in the process, or 0 with the reason in the log.
 #[unsafe(no_mangle)]
 extern "C" fn tenma_rs_plugin_adopt(name: *const u8, name_len: usize, rid: u64) -> u64 {
     let name = text(name, name_len);
@@ -365,7 +368,7 @@ extern "C" fn tenma_rs_plugin_adopt(name: *const u8, name_len: usize, rid: u64) 
         eprintln!("tenma: request {rid} has no open WebSocket to adopt");
         return 0;
     };
-    let conn = rid;
+    let conn = NEXT_CONN.fetch_add(1, Ordering::Relaxed);
     adopted(|map| map.insert(conn, Adopted { outgoing, queued }));
     adopt(conn);
     // Incoming messages go to the plugin on the worker's loop; the plugin writes from wherever it likes.

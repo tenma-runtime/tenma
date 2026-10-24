@@ -36,7 +36,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use bytes::Bytes;
-use http_body_util::{BodyExt, Either, Full, Limited};
+use http_body_util::{BodyExt, Either, Full};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -1433,7 +1433,11 @@ fn serve(
                     let (handler, mounts) = (*handler, mounts.clone());
                     let peers = (remote, local);
                     let counter = Rc::clone(&open);
-                    let service = service_fn(move |request| respond(handler, mounts.clone(), request, options, peers, Rc::clone(&counter)));
+                    // The streams of an HTTP/2 connection share one --max-body for their request bodies
+                    let buffered = Rc::new(Cell::new(0));
+                    let service = service_fn(move |request| {
+                        respond(handler, mounts.clone(), request, options, peers, Rc::clone(&counter), Rc::clone(&buffered))
+                    });
                     let drained = drained.clone();
                     let open = Open::count(&open);
                     tokio::task::spawn_local(async move {
@@ -1518,6 +1522,9 @@ async fn serve_http<S, H>(
     }
 }
 
+/// Streams one HTTP/2 connection may have open at once, each a request on the worker.
+const MAX_H2_STREAMS: u32 = 32;
+
 /// Serves HTTP/2 on a TLS connection whose client chose it. Each request is a stream of its own, on
 /// this worker's thread; once the worker drains, the client is told to open no new streams.
 async fn serve_h2<S, H>(
@@ -1535,6 +1542,7 @@ async fn serve_h2<S, H>(
     let stream = WriteTimeout::new(stream, options.request_timeout);
     let connection = hyper::server::conn::http2::Builder::new(LocalExecutor)
         .timer(hyper_util::rt::TokioTimer::new())
+        .max_concurrent_streams(MAX_H2_STREAMS)
         .serve_connection(TokioIo::new(stream), service);
     tokio::pin!(connection);
     tokio::select! {
@@ -1691,10 +1699,46 @@ impl<S: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for WriteTimeout<S>
     }
 }
 
+enum BodyError {
+    TooLarge,
+    Broken,
+}
+
+/// The part of a connection's request bodies one request holds, given back when the request ends.
+struct Held {
+    buffered: Rc<Cell<usize>>,
+    bytes: usize,
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        self.buffered.set(self.buffered.get() - self.bytes);
+    }
+}
+
+/// Reads a request body into memory. All requests of the connection together stay under `max_body`.
+async fn collect(mut body: Incoming, held: &mut Held, max_body: usize) -> Result<Bytes, BodyError> {
+    let mut data = Vec::new();
+    while let Some(frame) = body.frame().await {
+        let frame = frame.map_err(|_| BodyError::Broken)?;
+        let Ok(chunk) = frame.into_data() else {
+            continue;
+        };
+        if held.buffered.get() + chunk.len() > max_body {
+            return Err(BodyError::TooLarge);
+        }
+        held.buffered.set(held.buffered.get() + chunk.len());
+        held.bytes += chunk.len();
+        data.extend_from_slice(&chunk);
+    }
+    Ok(Bytes::from(data))
+}
+
 /// Body of a response: complete or piece by piece (from PHP or a file).
 pub type ResponseBody = Either<Full<Bytes>, streams::ChannelBody>;
 
 /// `peers`: remote and local address of the connection. `open`: the worker's open connections.
+/// `buffered`: the bytes of request bodies the connection holds right now.
 async fn respond(
     handler: u32,
     mounts: std::sync::Arc<Vec<files::Mount>>,
@@ -1702,6 +1746,7 @@ async fn respond(
     options: Options,
     peers: (std::net::SocketAddr, std::net::SocketAddr),
     open: Rc<Cell<usize>>,
+    buffered: Rc<Cell<usize>>,
 ) -> Result<Response<ResponseBody>, Infallible> {
     // The file first, if there is one; otherwise the handler
     if !mounts.is_empty()
@@ -1712,22 +1757,15 @@ async fn respond(
     }
     let (mut parts, body) = request.into_parts();
     // ponytail: body fully in memory up to the limit; streams when large uploads come
-    let body = match tokio::time::timeout(
-        options.request_timeout,
-        Limited::new(body, options.max_body).collect(),
-    )
-    .await
-    {
-        Ok(Ok(collected)) => collected.to_bytes(),
-        Ok(Err(error))
-            if error
-                .downcast_ref::<http_body_util::LengthLimitError>()
-                .is_some() =>
-        {
+    let mut held = Held { buffered, bytes: 0 };
+    let collected = collect(body, &mut held, options.max_body);
+    let body = match tokio::time::timeout(options.request_timeout, collected).await {
+        Ok(Ok(body)) => body,
+        Ok(Err(BodyError::TooLarge)) => {
             return Ok(plain(StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large\n"));
         }
         // Aborted upload, broken chunked encoding
-        Ok(Err(_)) => return Ok(plain(StatusCode::BAD_REQUEST, "Bad Request\n")),
+        Ok(Err(BodyError::Broken)) => return Ok(plain(StatusCode::BAD_REQUEST, "Bad Request\n")),
         Err(_) => return Ok(plain(StatusCode::REQUEST_TIMEOUT, "Request Timeout\n")),
     };
     if BROKEN.get() {

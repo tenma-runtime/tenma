@@ -2289,7 +2289,8 @@ static void wrap_journaled(void) {
     }
 }
 
-int tenma_start(void) {
+/** binary: tenma's own path, for the PHP_BINARY constant (NULL leaves it empty). */
+int tenma_start(const char *binary) {
     // Like console.log, echo reaches the console at once, even when stdout is a pipe
     setvbuf(stdout, NULL, _IOLBF, 0);
     php_embed_module.startup = tenma_startup;
@@ -2303,6 +2304,7 @@ int tenma_start(void) {
     }
     php_embed_module.name = "tenma";
     php_embed_module.pretty_name = "tenma";
+    php_embed_module.executable_location = (char *) binary;
     if (php_embed_init(0, NULL) != SUCCESS) {
         return -1;
     }

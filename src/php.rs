@@ -53,7 +53,7 @@ struct RawResponse {
 }
 
 unsafe extern "C" {
-    fn tenma_start() -> c_int;
+    fn tenma_start(binary: *const c_char) -> c_int;
     fn tenma_define_ini(entry: *const c_char);
     fn tenma_set_ini_path(path: *const c_char);
     fn tenma_set_server_name(name: *const c_char);
@@ -348,7 +348,14 @@ pub fn complete(op: u64, result: OpResult) -> Result<(), ()> {
 }
 
 pub fn start() -> Result<(), String> {
-    if unsafe { tenma_start() } == 0 {
+    // For the PHP_BINARY constant; PHP copies it during startup
+    let binary = std::env::current_exe()
+        .ok()
+        .and_then(|path| CString::new(path.into_os_string().into_encoded_bytes()).ok());
+    let pointer = binary
+        .as_ref()
+        .map_or(std::ptr::null(), |path| path.as_ptr());
+    if unsafe { tenma_start(pointer) } == 0 {
         Ok(())
     } else {
         Err("PHP does not start".into())

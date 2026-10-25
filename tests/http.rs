@@ -1031,16 +1031,17 @@ fn code_with_minus_r_and_scripts_with_a_shebang_run_as_with_php() {
         r#"[["Standard input code","a","-b"],"99M"]"#
     );
 
-    // Composer finds tenma through PHP_BINARY for @php; one set already stays
+    // Composer finds tenma through PHP_BINARY for @php, the variable and the constant; a variable
+    // set already stays
     let script = Command::new(tenma)
         .arg("tests/fixtures/shebang.php")
         .env_remove("PHP_BINARY")
         .output()
         .unwrap();
-    let binary = std::fs::canonicalize(tenma).unwrap();
+    let binary = std::fs::canonicalize(tenma).unwrap().display().to_string();
     assert_eq!(
-        String::from_utf8_lossy(&script.stdout).trim(),
-        binary.display().to_string()
+        String::from_utf8_lossy(&script.stdout),
+        format!("{binary}\n{binary}\n")
     );
     let given = Command::new(tenma)
         .arg("tests/fixtures/shebang.php")
@@ -1048,8 +1049,8 @@ fn code_with_minus_r_and_scripts_with_a_shebang_run_as_with_php() {
         .output()
         .unwrap();
     assert_eq!(
-        String::from_utf8_lossy(&given.stdout).trim(),
-        "/usr/bin/php"
+        String::from_utf8_lossy(&given.stdout),
+        format!("/usr/bin/php\n{binary}\n")
     );
 }
 

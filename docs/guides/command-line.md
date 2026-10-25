@@ -25,7 +25,7 @@ tenma --version
 | `tenma --stubs [DIR]`                                    | prints Tenma's PHP API as stubs, or writes one file per class to DIR (see [Stubs for IDEs](#stubs-for-ides-and-phpstan)) |
 | `tenma replay FILE [--until N \| --request N] [--check]` | plays a journal from `--record` into a fresh interpreter ([Record and replay](replay.md))                                |
 | `tenma replay FILE --list`                               | the requests of a journal, numbered for `--request`                                                                      |
-| `tenma --version`, `tenma -v`                            | prints the Tenma and PHP versions, such as `tenma 0.2.3 (PHP 8.5.12)`                                                    |
+| `tenma --version`, `tenma -v`                            | prints the Tenma and PHP versions, such as `tenma 0.2.4 (PHP 8.5.12)`                                                    |
 
 `lsp`, `docs`, `--stubs` and `--version` only count as the first argument. `build` comes after the options, so `tenma -d memory_limit=1G build` works.
 

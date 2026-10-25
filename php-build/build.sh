@@ -59,7 +59,7 @@ fi
   `# Network and cryptography` \
   --with-openssl --with-curl --with-sodium \
   `# Other` \
-  --enable-intl --with-gmp$GMP --with-zip \
+  --enable-intl --with-gmp$GMP --with-zip --enable-phar \
   --enable-gd --with-jpeg --with-webp --with-freetype
 make -j"$CPUS"
 make install

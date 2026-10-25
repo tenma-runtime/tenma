@@ -3215,6 +3215,8 @@ int tenma_execute(const char *path, const char *const *argv, int argc) {
     register_script(path, argv, argc);
     zend_file_handle file;
     zend_stream_init_filename(&file, path);
+    // Skip a #! line as the php command does, so scripts like composer run as they are
+    CG(skip_shebang) = 1;
     volatile int status = 255;
     zend_try {
         php_execute_script(&file);

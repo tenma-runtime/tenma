@@ -9,6 +9,7 @@ order: 300
 ```text
 tenma [options] <script.php> [arguments …]
 tenma [options] build [tenma.json]
+tenma composer [arguments …]
 tenma lsp
 tenma docs [<path>...] [--out <dir>]
 tenma --stubs [DIR]
@@ -20,6 +21,7 @@ tenma --version
 | `tenma script.php`                                       | runs the script; it serves if it starts an `Http\Server`                                                                 |
 | `tenma build [tenma.json]`                               | runs the [build hooks](watch.md#tenma-build) once, `./tenma.json` by default                                             |
 | `tenma check [script.php\|tenma.json]`                   | checks the options, hooks and plugins of [tenma.json](configuration.md#tenmajson) without starting                       |
+| `tenma composer [arguments …]`                           | runs the built-in [Composer](#composer-and-other-php-tools)                                                              |
 | `tenma lsp`                                              | the [language server](language-server.md), on stdin and stdout                                                           |
 | `tenma docs [paths] [--out <dir>]`                       | writes [reference pages](reference-docs.md), into `docs/reference` by default                                            |
 | `tenma --stubs [DIR]`                                    | prints Tenma's PHP API as stubs, or writes one file per class to DIR (see [Stubs for IDEs](#stubs-for-ides-and-phpstan)) |
@@ -27,7 +29,7 @@ tenma --version
 | `tenma replay FILE --list`                               | the requests of a journal, numbered for `--request`                                                                      |
 | `tenma --version`, `tenma -v`                            | prints the Tenma and PHP versions, such as `tenma 0.2.6 (PHP 8.5.12)`                                                    |
 
-`lsp`, `docs`, `--stubs` and `--version` only count as the first argument. `build` comes after the options, so `tenma -d memory_limit=1G build` works.
+`composer`, `lsp`, `docs`, `--stubs` and `--version` only count as the first argument. `build` comes after the options, so `tenma -d memory_limit=1G build` works.
 
 ## Options
 
@@ -53,6 +55,7 @@ Options come before the script. Each takes its value as the next argument.
 | `--server-name NAME`           | `localhost`                     | `$_SERVER['SERVER_NAME']` in [classic mode](classic-mode.md)                                       |
 | `-d name=value`                |                                 | a PHP setting, also written `-dname=value`; any number of times                                    |
 | `-c FILE\|DIR`                 |                                 | the `php.ini` to read, or the directory that holds it                                              |
+| `-r CODE`                      |                                 | runs CODE (without `<?php`) instead of a script; the arguments after it go to `$argv`              |
 | `--watch`                      |                                 | reloads on changes and runs the hooks of `tenma.json` ([Watch mode](watch.md))                     |
 | `--inspect[=[HOST:]PORT]`      | `127.0.0.1:9229`                | starts the [debugger](debugger.md)                                                                 |
 | `--inspect-wait[=[HOST:]PORT]` | `127.0.0.1:9229`                | the debugger; the script waits until the editor has set its breakpoints                            |
@@ -91,6 +94,21 @@ array(3) {
 ```
 
 One script can serve and run tasks this way: `tenma index.php db:migrate` runs a task, `tenma index.php` serves. See [Scripts without a server](process.md#scripts-without-a-server).
+
+## Composer and other PHP tools
+
+Composer is built in, so a project needs neither PHP nor Composer installed:
+
+```bash
+tenma composer install
+tenma composer require psr/log
+```
+
+The first run writes Composer to `~/.cache/tenma` (or `$XDG_CACHE_HOME/tenma`), because PHP opens a phar only from a file. Each Tenma release brings the Composer it was built with; `composer self-update` has no lasting effect.
+
+Other PHP tools run as they come: Tenma skips the `#!` line of a script and has the phar extension, so `tenma vendor/bin/phpstan` or `tenma tool.phar` work.
+
+Tenma sets `PHP_BINARY` to its own path unless it is already set. Composer runs `@php` scripts through it, and so does Symfony Process, so `@php -r "…"` and `@php bin/console` run with Tenma too.
 
 ## The port
 

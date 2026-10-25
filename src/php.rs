@@ -69,6 +69,12 @@ unsafe extern "C" {
     fn tenma_exit_status() -> c_int;
     fn tenma_eval(code: *const c_char, len: usize, name: *const c_char) -> c_int;
     fn tenma_execute(path: *const c_char, argv: *const *const c_char, argc: c_int) -> c_int;
+    fn tenma_execute_code(
+        code: *const c_char,
+        len: usize,
+        argv: *const *const c_char,
+        argc: c_int,
+    ) -> c_int;
     fn tenma_handle(handler: u32, rid: u64, request: *const RawRequest) -> c_int;
     fn tenma_response_free(response: *mut RawResponse);
     fn tenma_complete_null(op: u64) -> c_int;
@@ -490,18 +496,26 @@ pub fn eval(code: &str, name: &str) -> Result<(), String> {
     }
 }
 
-/// Runs `argv[0]` as a script, with `argv` as `$argv`, and returns the exit status.
-pub fn execute(argv: &[String]) -> Result<i32, String> {
-    let path = std::fs::canonicalize(&argv[0]).map_err(|error| format!("{}: {error}", argv[0]))?;
-    let path =
-        CString::new(path.to_string_lossy().as_bytes()).map_err(|_| "path contains a null byte")?;
+/// Runs `argv[0]` as a script, with `argv` as `$argv`, and returns the exit status. With `code`
+/// (`-r`) that code runs instead, as with `php -r`.
+pub fn execute(argv: &[String], code: Option<&str>) -> Result<i32, String> {
     let args: Vec<CString> = argv
         .iter()
         .map(|arg| CString::new(arg.as_bytes()))
         .collect::<Result<_, _>>()
         .map_err(|_| "argument contains a null byte")?;
     let pointers: Vec<*const c_char> = args.iter().map(|arg| arg.as_ptr()).collect();
-    Ok(unsafe { tenma_execute(path.as_ptr(), pointers.as_ptr(), pointers.len() as c_int) })
+    let count = pointers.len() as c_int;
+    if let Some(code) = code {
+        return Ok(unsafe {
+            tenma_execute_code(code.as_ptr().cast(), code.len(), pointers.as_ptr(), count)
+        });
+    }
+
+    let path = std::fs::canonicalize(&argv[0]).map_err(|error| format!("{}: {error}", argv[0]))?;
+    let path =
+        CString::new(path.to_string_lossy().as_bytes()).map_err(|_| "path contains a null byte")?;
+    Ok(unsafe { tenma_execute(path.as_ptr(), pointers.as_ptr(), count) })
 }
 
 /// PHP's response to a request. If it is dropped before PHP responded (hyper drops it when the

@@ -47,7 +47,7 @@ use tokio::sync::Notify;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::LocalSet;
 
-const USAGE: &str = "Usage: tenma [--watch] [--inspect[-wait|-brk][=[HOST:]PORT]] [--workers N|auto] [--max-body SIZE] [--max-requests N] [--db-pool N] [-d name=value] [-c php.ini] [--server-name NAME] [--request-timeout SECONDS] [--max-connections N] [--pubsub redis://HOST] [--pdo-pgsql native] [--durable postgres://URL] [--plugin FILE] [--config tenma.json] [--stop-timeout SECONDS] [--record DIR [--record-on error] [--record-max-size SIZE] [--record-max-body SIZE] [--record-redact HEADER,...]] [--tls-cert FILE --tls-key FILE [--tls-port N]] <script.php> [arguments …]\n       tenma build [tenma.json]   (runs the hooks of tenma.json once)\n       tenma check [script.php|tenma.json]   (checks the options, hooks and plugins of tenma.json without starting)\n       tenma --stubs [DIR]   (the PHP API as stubs for IDEs and PHPStan; with DIR one file per class)\n       tenma lsp   (the language server for editors, on stdin and stdout)\n       tenma docs [<path>...] [--out <dir>]   (Markdown reference pages for PHP classes and functions; without paths for Tenma's API)\n       tenma replay FILE [--until N | --request N] [--check]   (plays a recorded journal into a fresh interpreter, without I/O)\n       tenma replay FILE --list   (the requests of a journal, numbered for --request)\n       tenma --version";
+const USAGE: &str = "Usage: tenma [--watch] [--inspect[-wait|-brk][=[HOST:]PORT]] [--workers N|auto] [--max-body SIZE] [--max-requests N] [--db-pool N] [-d name=value] [-c php.ini] [-r code] [--server-name NAME] [--request-timeout SECONDS] [--max-connections N] [--pubsub redis://HOST] [--pdo-pgsql native] [--durable postgres://URL] [--plugin FILE] [--config tenma.json] [--stop-timeout SECONDS] [--record DIR [--record-on error] [--record-max-size SIZE] [--record-max-body SIZE] [--record-redact HEADER,...]] [--tls-cert FILE --tls-key FILE [--tls-port N]] <script.php> [arguments …]\n       tenma build [tenma.json]   (runs the hooks of tenma.json once)\n       tenma check [script.php|tenma.json]   (checks the options, hooks and plugins of tenma.json without starting)\n       tenma --stubs [DIR]   (the PHP API as stubs for IDEs and PHPStan; with DIR one file per class)\n       tenma composer [arguments …]   (the built-in Composer)\n       tenma lsp   (the language server for editors, on stdin and stdout)\n       tenma docs [<path>...] [--out <dir>]   (Markdown reference pages for PHP classes and functions; without paths for Tenma's API)\n       tenma replay FILE [--until N | --request N] [--check]   (plays a recorded journal into a fresh interpreter, without I/O)\n       tenma replay FILE --list   (the requests of a journal, numbered for --request)\n       tenma --version";
 /// How long running requests may take to finish on shutdown or restart.
 const DRAIN: Duration = Duration::from_secs(10);
 /// With --watch: an open SSE or WebSocket connection should not hold up every reload for 10 s.
@@ -145,6 +145,13 @@ pub fn request_restart() {
 }
 
 fn main() -> ExitCode {
+    // Composer runs @php and Symfony Process runs PHP through PHP_BINARY: point it at tenma unless
+    // set. Before any thread, so setting the environment is safe
+    if std::env::var_os("PHP_BINARY").is_none()
+        && let Ok(binary) = std::env::current_exe()
+    {
+        unsafe { std::env::set_var("PHP_BINARY", binary) };
+    }
     match std::env::args().nth(1).as_deref() {
         Some("--stubs") => return stubs(),
         Some("lsp") => return tool(stdlib::Tool::Lsp, "Lsp"),
@@ -160,7 +167,17 @@ fn main() -> ExitCode {
         }
         _ => {}
     }
-    let given: Vec<String> = std::env::args().skip(1).collect();
+    let mut given: Vec<String> = std::env::args().skip(1).collect();
+    // tenma composer …: the embedded Composer runs as the script, the rest are its arguments
+    if given.first().is_some_and(|first| first == "composer") {
+        match composer() {
+            Ok(path) => given[0] = path,
+            Err(message) => {
+                eprintln!("tenma: {message}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
     let (argv, options) = match parse_args(&given) {
         Ok(parsed) => parsed,
         Err(message) => {
@@ -218,6 +235,36 @@ fn main() -> ExitCode {
     plugins::shutdown();
     php::stop();
     ExitCode::from(status)
+}
+
+/// Composer, built into the binary (php-build/build.sh fetches it).
+const COMPOSER: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/php-build/out/composer.phar"
+));
+
+/// Writes the embedded Composer to the user's cache, unless it is there already, and returns its
+/// path. PHP opens a phar only from a file.
+fn composer() -> Result<String, String> {
+    let cache = std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::Path::new(&home).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("tenma");
+    let path = cache.join(format!("composer-{}.phar", env!("CARGO_PKG_VERSION")));
+    if std::fs::read(&path).ok().as_deref() != Some(COMPOSER) {
+        // Written beside it and renamed, so a second tenma composer never runs half a file
+        let partial = cache.join(format!(
+            "composer-{}.phar.{}",
+            env!("CARGO_PKG_VERSION"),
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&cache)
+            .and_then(|()| std::fs::write(&partial, COMPOSER))
+            .and_then(|()| std::fs::rename(&partial, &path))
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+    }
+    Ok(path.display().to_string())
 }
 
 /// `tenma --stubs [DIR]`: loads the standard library without a script and prints its public API as
@@ -382,6 +429,13 @@ fn parse_args(given: &[String]) -> Result<(Vec<String>, Options), String> {
             "-d" => php::define_ini(&value("-d")?)?,
             define if define.starts_with("-d") => php::define_ini(&define[2..])?,
             "-c" => php::set_ini_path(&value("-c")?)?,
+            // As php -r: the code instead of a script, the rest are its arguments
+            "-r" => {
+                let _ = CODE.set(value("-r")?);
+                argv.push("Standard input code".to_owned());
+                argv.extend(args);
+                break;
+            }
             "--request-timeout" => {
                 let seconds = value("--request-timeout")?;
                 options.request_timeout = seconds
@@ -559,6 +613,9 @@ fn check() -> ExitCode {
     }
 }
 
+/// `-r`: the code that runs instead of a script.
+static CODE: OnceLock<String> = OnceLock::new();
+
 /// The tenma.json the script got, if any: its hooks run with --watch.
 static CONFIG: OnceLock<std::path::PathBuf> = OnceLock::new();
 
@@ -579,6 +636,10 @@ fn with_config(given: &[String]) -> Result<Vec<String>, String> {
         }
         if !arg.starts_with('-') {
             script = Some(arg.clone());
+            break;
+        }
+        // Code instead of a script: no tenma.json belongs to it
+        if arg == "-r" {
             break;
         }
         // Options with a value, as parse_args reads them
@@ -1341,7 +1402,7 @@ fn load(argv: &[String], dev: bool, options: Options) -> Result<Vec<php::Listene
             }
         };
     }
-    match php::execute(argv) {
+    match php::execute(argv, CODE.get().map(String::as_str)) {
         Ok(0) => Ok(php::listeners()),
         Ok(status) => Err(status as u8),
         Err(message) => {

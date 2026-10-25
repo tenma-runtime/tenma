@@ -3228,6 +3228,19 @@ int tenma_execute(const char *path, const char *const *argv, int argc) {
     return status;
 }
 
+/** Runs code without <?php as `php -r` does, with argv as $argv. Returns the exit status. */
+int tenma_execute_code(const char *code, size_t len, const char *const *argv, int argc) {
+    script_exited = 0;
+    register_script("", argv, argc);
+    zend_try {
+        // As php -r: an uncaught exception is a fatal error, exit() sets the status
+        zend_eval_stringl_ex((char *) code, len, NULL, "Command line code", 1);
+    } zend_catch {
+        EG(current_execute_data) = NULL;
+    } zend_end_try();
+    return EG(exit_status);
+}
+
 static void add_str(zval *array, const char *key, tenma_str value) {
     add_assoc_stringl(array, key, value.ptr, value.len);
 }

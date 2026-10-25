@@ -10,6 +10,9 @@
 set -eu
 VERSION=8.5.12
 SHA256=08bc2eba2a588654ade1357174aa646b761556c862dda0678345ee29ed481209
+# Composer, embedded in tenma for `tenma composer`
+COMPOSER=2.10.3
+COMPOSER_SHA256=7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6
 cd "$(dirname "$0")"
 
 if [ ! -f "php-$VERSION.tar.xz" ]; then
@@ -17,6 +20,10 @@ if [ ! -f "php-$VERSION.tar.xz" ]; then
 fi
 echo "$SHA256  php-$VERSION.tar.xz" | shasum -a 256 -c -
 rm -rf "php-$VERSION" && tar xf "php-$VERSION.tar.xz"
+
+mkdir -p out
+curl -sSfL "https://getcomposer.org/download/$COMPOSER/composer.phar" -o out/composer.phar
+echo "$COMPOSER_SHA256  out/composer.phar" | shasum -a 256 -c -
 
 cd "php-$VERSION"
 if [ "$(uname -s)" = Darwin ]; then

@@ -5,3 +5,7 @@ Source: https://github.com/tenma-runtime/tenma
 This product includes PHP software, freely available from
 <https://www.php.net/software/>.
 PHP is licensed under the PHP License 3.01.
+
+This product includes Composer, https://getcomposer.org/
+Copyright (c) Nils Adermann, Jordi Boggiano
+Composer is licensed under the MIT License.

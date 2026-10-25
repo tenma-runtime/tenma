@@ -1012,6 +1012,58 @@ fn settings_with_minus_d_and_php_ini() {
 }
 
 #[test]
+fn code_with_minus_r_and_scripts_with_a_shebang_run_as_with_php() {
+    let tenma = env!("CARGO_BIN_EXE_tenma");
+    let code = Command::new(tenma)
+        .args([
+            "-d",
+            "memory_limit=99M",
+            "-r",
+            "echo json_encode([$argv, ini_get('memory_limit')]); exit(3);",
+            "a",
+            "-b",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(code.status.code(), Some(3));
+    assert_eq!(
+        String::from_utf8_lossy(&code.stdout),
+        r#"[["Standard input code","a","-b"],"99M"]"#
+    );
+
+    // Composer finds tenma through PHP_BINARY for @php; one set already stays
+    let script = Command::new(tenma)
+        .arg("tests/fixtures/shebang.php")
+        .env_remove("PHP_BINARY")
+        .output()
+        .unwrap();
+    let binary = std::fs::canonicalize(tenma).unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&script.stdout).trim(),
+        binary.display().to_string()
+    );
+    let given = Command::new(tenma)
+        .arg("tests/fixtures/shebang.php")
+        .env("PHP_BINARY", "/usr/bin/php")
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&given.stdout).trim(),
+        "/usr/bin/php"
+    );
+}
+
+#[test]
+fn the_built_in_composer_runs() {
+    let output = Command::new(env!("CARGO_BIN_EXE_tenma"))
+        .args(["composer", "--version"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Composer version 2."));
+}
+
+#[test]
 fn server_variables_and_addresses() {
     let port = 18_091;
     let _server = Server(

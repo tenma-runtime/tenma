@@ -8,7 +8,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
@@ -34,8 +34,10 @@ static CHANNELS: LazyLock<Mutex<HashMap<Vec<u8>, Vec<(u64, Sender<Vec<u8>>)>>>> 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// --pubsub: what the Redis thread should do.
-// ponytail: unbounded; while Redis is down, publishes queue up and go out late after the reconnect
 static REDIS: OnceLock<UnboundedSender<Command>> = OnceLock::new();
+/// Publishes handed to the Redis thread that it has not taken yet. While Redis is down they wait for the
+/// reconnect, up to QUEUED of them; beyond that new ones are dropped.
+static WAITING: AtomicUsize = AtomicUsize::new(0);
 
 enum Command {
     Publish(Vec<u8>, Vec<u8>),
@@ -65,10 +67,23 @@ fn tell_redis(command: Command) {
 fn publish(channel: &[u8], message: &[u8]) {
     match REDIS.get() {
         Some(redis) => {
-            let _ = redis.send(Command::Publish(channel.to_vec(), message.to_vec()));
+            queue_publish(redis, channel, message);
         }
         None => deliver(channel, message),
     }
+}
+
+/// Hands a publish to the Redis thread unless QUEUED are waiting already; false when it is dropped.
+fn queue_publish(redis: &UnboundedSender<Command>, channel: &[u8], message: &[u8]) -> bool {
+    if WAITING.fetch_add(1, Ordering::Relaxed) >= QUEUED {
+        WAITING.fetch_sub(1, Ordering::Relaxed);
+        return false;
+    }
+    let sent = redis.send(Command::Publish(channel.to_vec(), message.to_vec()));
+    if sent.is_err() {
+        WAITING.fetch_sub(1, Ordering::Relaxed);
+    }
+    sent.is_ok()
 }
 
 /// Hands the message to every subscription of the channel in this process. Also what a native
@@ -269,7 +284,10 @@ async fn connected(
                 }
             }
             Some(command) = commands.recv() => match command {
-                Command::Publish(channel, message) => publish_to(&mut publisher, channel, message, unsent).await?,
+                Command::Publish(channel, message) => {
+                    WAITING.fetch_sub(1, Ordering::Relaxed);
+                    publish_to(&mut publisher, channel, message, unsent).await?;
+                }
                 Command::Subscribe(channel) => sink.subscribe(channel).await?,
                 Command::Unsubscribe(channel) => sink.unsubscribe(channel).await?,
             },
@@ -294,4 +312,23 @@ async fn publish_to(
         *unsent = Some((channel, message));
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn publishes_for_redis_stop_at_queued_until_the_thread_takes_one() {
+        let (sender, mut commands) = unbounded_channel();
+        for _ in 0..QUEUED {
+            assert!(queue_publish(&sender, b"news", b"m"));
+        }
+        assert!(!queue_publish(&sender, b"news", b"dropped"));
+
+        // What the Redis thread does with each publish it takes
+        assert!(matches!(commands.try_recv(), Ok(Command::Publish(..))));
+        WAITING.fetch_sub(1, Ordering::Relaxed);
+        assert!(queue_publish(&sender, b"news", b"later"));
+    }
 }

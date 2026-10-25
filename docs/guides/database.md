@@ -331,4 +331,4 @@ Messages:
 - `publish()` does not wait. A worker that has not subscribed yet (still starting or restarting) misses the message.
 - A subscription made at startup lasts as long as the worker. One made in a request ends with the request, for streams and WebSockets with the connection.
 - A subscription keeps a script without a server alive until `cancel()`. Callbacks already running finish.
-- With `--pubsub`, a lost Redis connection is reported once on stderr, and Tenma reconnects every second. Messages published meanwhile go out after the reconnect. Other processes miss what was published while they were cut off.
+- With `--pubsub`, a lost Redis connection is reported once on stderr, and Tenma reconnects every second. Messages published meanwhile go out after the reconnect, up to 1024 of them; later ones are dropped. Other processes miss what was published while they were cut off.

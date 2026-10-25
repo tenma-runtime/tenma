@@ -9,6 +9,7 @@ order: 300
 ```text
 tenma [options] <script.php> [arguments …]
 tenma [options] build [tenma.json]
+tenma install|update|remove composer
 tenma composer [arguments …]
 tenma lsp
 tenma docs [<path>...] [--out <dir>]
@@ -21,7 +22,10 @@ tenma --version
 | `tenma script.php`                                       | runs the script; it serves if it starts an `Http\Server`                                                                 |
 | `tenma build [tenma.json]`                               | runs the [build hooks](watch.md#tenma-build) once, `./tenma.json` by default                                             |
 | `tenma check [script.php\|tenma.json]`                   | checks the options, hooks and plugins of [tenma.json](configuration.md#tenmajson) without starting                       |
-| `tenma composer [arguments …]`                           | runs the built-in [Composer](#composer-and-other-php-tools)                                                              |
+| `tenma install composer`                                 | fetches the latest stable [Composer](#composer-and-other-php-tools)                                                      |
+| `tenma update composer`                                  | fetches the latest stable Composer again                                                                                 |
+| `tenma remove composer`                                  | deletes the installed Composer                                                                                           |
+| `tenma composer [arguments …]`                           | runs the installed Composer                                                                                              |
 | `tenma lsp`                                              | the [language server](language-server.md), on stdin and stdout                                                           |
 | `tenma docs [paths] [--out <dir>]`                       | writes [reference pages](reference-docs.md), into `docs/reference` by default                                            |
 | `tenma --stubs [DIR]`                                    | prints Tenma's PHP API as stubs, or writes one file per class to DIR (see [Stubs for IDEs](#stubs-for-ides-and-phpstan)) |
@@ -29,7 +33,7 @@ tenma --version
 | `tenma replay FILE --list`                               | the requests of a journal, numbered for `--request`                                                                      |
 | `tenma --version`, `tenma -v`                            | prints the Tenma and PHP versions, such as `tenma 0.2.8 (PHP 8.5.12)`                                                    |
 
-`composer`, `lsp`, `docs`, `--stubs` and `--version` only count as the first argument. `build` comes after the options, so `tenma -d memory_limit=1G build` works.
+`install`, `update`, `remove`, `composer`, `lsp`, `docs`, `--stubs` and `--version` only count as the first argument. `build` comes after the options, so `tenma -d memory_limit=1G build` works.
 
 ## Options
 
@@ -97,14 +101,15 @@ One script can serve and run tasks this way: `tenma index.php db:migrate` runs a
 
 ## Composer and other PHP tools
 
-Composer is built in, so a project needs neither PHP nor Composer installed:
+Tenma runs Composer, so a project needs no PHP of its own. Install it once:
 
 ```bash
+tenma install composer
 tenma composer install
 tenma composer require psr/log
 ```
 
-The first run writes Composer to `~/.cache/tenma` (or `$XDG_CACHE_HOME/tenma`), because PHP opens a phar only from a file. Each Tenma release brings the Composer it was built with; `composer self-update` has no lasting effect.
+`tenma install composer` fetches the latest stable `composer.phar` from getcomposer.org, checks it against the SHA-256 checksum published there and keeps it in `~/.local/share/tenma` (or `$XDG_DATA_HOME/tenma`). `tenma update composer` fetches it again, `tenma remove composer` deletes it.
 
 Other PHP tools run as they come: Tenma skips the `#!` line of a script and has the phar extension, so `tenma vendor/bin/phpstan` or `tenma tool.phar` work.
 

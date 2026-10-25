@@ -7,6 +7,7 @@
 //! the script again. Ctrl+C or SIGTERM stop accepting connections and let running requests
 //! finish. With --watch, all workers restart that way when a file the script loaded changes.
 
+mod composer;
 mod db;
 mod dev;
 mod durable;
@@ -47,7 +48,7 @@ use tokio::sync::Notify;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::LocalSet;
 
-const USAGE: &str = "Usage: tenma [--watch] [--inspect[-wait|-brk][=[HOST:]PORT]] [--workers N|auto] [--max-body SIZE] [--max-requests N] [--db-pool N] [-d name=value] [-c php.ini] [-r code] [--server-name NAME] [--request-timeout SECONDS] [--max-connections N] [--pubsub redis://HOST] [--pdo-pgsql native] [--durable postgres://URL] [--plugin FILE] [--config tenma.json] [--stop-timeout SECONDS] [--record DIR [--record-on error] [--record-max-size SIZE] [--record-max-body SIZE] [--record-redact HEADER,...]] [--tls-cert FILE --tls-key FILE [--tls-port N]] <script.php> [arguments …]\n       tenma build [tenma.json]   (runs the hooks of tenma.json once)\n       tenma check [script.php|tenma.json]   (checks the options, hooks and plugins of tenma.json without starting)\n       tenma --stubs [DIR]   (the PHP API as stubs for IDEs and PHPStan; with DIR one file per class)\n       tenma composer [arguments …]   (the built-in Composer)\n       tenma lsp   (the language server for editors, on stdin and stdout)\n       tenma docs [<path>...] [--out <dir>]   (Markdown reference pages for PHP classes and functions; without paths for Tenma's API)\n       tenma replay FILE [--until N | --request N] [--check]   (plays a recorded journal into a fresh interpreter, without I/O)\n       tenma replay FILE --list   (the requests of a journal, numbered for --request)\n       tenma --version";
+const USAGE: &str = "Usage: tenma [--watch] [--inspect[-wait|-brk][=[HOST:]PORT]] [--workers N|auto] [--max-body SIZE] [--max-requests N] [--db-pool N] [-d name=value] [-c php.ini] [-r code] [--server-name NAME] [--request-timeout SECONDS] [--max-connections N] [--pubsub redis://HOST] [--pdo-pgsql native] [--durable postgres://URL] [--plugin FILE] [--config tenma.json] [--stop-timeout SECONDS] [--record DIR [--record-on error] [--record-max-size SIZE] [--record-max-body SIZE] [--record-redact HEADER,...]] [--tls-cert FILE --tls-key FILE [--tls-port N]] <script.php> [arguments …]\n       tenma build [tenma.json]   (runs the hooks of tenma.json once)\n       tenma check [script.php|tenma.json]   (checks the options, hooks and plugins of tenma.json without starting)\n       tenma --stubs [DIR]   (the PHP API as stubs for IDEs and PHPStan; with DIR one file per class)\n       tenma install|update|remove composer   (Composer for tenma composer)\n       tenma composer [arguments …]   (runs Composer)\n       tenma lsp   (the language server for editors, on stdin and stdout)\n       tenma docs [<path>...] [--out <dir>]   (Markdown reference pages for PHP classes and functions; without paths for Tenma's API)\n       tenma replay FILE [--until N | --request N] [--check]   (plays a recorded journal into a fresh interpreter, without I/O)\n       tenma replay FILE --list   (the requests of a journal, numbered for --request)\n       tenma --version";
 /// How long running requests may take to finish on shutdown or restart.
 const DRAIN: Duration = Duration::from_secs(10);
 /// With --watch: an open SSE or WebSocket connection should not hold up every reload for 10 s.
@@ -157,6 +158,20 @@ fn main() -> ExitCode {
         Some("lsp") => return tool(stdlib::Tool::Lsp, "Lsp"),
         Some("docs") => return tool(stdlib::Tool::Docs, "Docs"),
         Some("check") => return check(),
+        Some(action @ ("install" | "update" | "remove"))
+            if std::env::args().nth(2).as_deref() == Some("composer") =>
+        {
+            return match composer::manage(action) {
+                Ok(message) => {
+                    println!("tenma: {message}");
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("tenma: {message}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
         Some("--version" | "-v") => {
             println!(
                 "tenma {} (PHP {})",
@@ -168,9 +183,9 @@ fn main() -> ExitCode {
         _ => {}
     }
     let mut given: Vec<String> = std::env::args().skip(1).collect();
-    // tenma composer …: the embedded Composer runs as the script, the rest are its arguments
+    // tenma composer …: the installed Composer runs as the script, the rest are its arguments
     if given.first().is_some_and(|first| first == "composer") {
-        match composer() {
+        match composer::script() {
             Ok(path) => given[0] = path,
             Err(message) => {
                 eprintln!("tenma: {message}");
@@ -235,36 +250,6 @@ fn main() -> ExitCode {
     plugins::shutdown();
     php::stop();
     ExitCode::from(status)
-}
-
-/// Composer, built into the binary (php-build/build.sh fetches it).
-const COMPOSER: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/php-build/out/composer.phar"
-));
-
-/// Writes the embedded Composer to the user's cache, unless it is there already, and returns its
-/// path. PHP opens a phar only from a file.
-fn composer() -> Result<String, String> {
-    let cache = std::env::var_os("XDG_CACHE_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| std::path::Path::new(&home).join(".cache")))
-        .unwrap_or_else(std::env::temp_dir)
-        .join("tenma");
-    let path = cache.join(format!("composer-{}.phar", env!("CARGO_PKG_VERSION")));
-    if std::fs::read(&path).ok().as_deref() != Some(COMPOSER) {
-        // Written beside it and renamed, so a second tenma composer never runs half a file
-        let partial = cache.join(format!(
-            "composer-{}.phar.{}",
-            env!("CARGO_PKG_VERSION"),
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&cache)
-            .and_then(|()| std::fs::write(&partial, COMPOSER))
-            .and_then(|()| std::fs::rename(&partial, &path))
-            .map_err(|error| format!("{}: {error}", path.display()))?;
-    }
-    Ok(path.display().to_string())
 }
 
 /// `tenma --stubs [DIR]`: loads the standard library without a script and prints its public API as

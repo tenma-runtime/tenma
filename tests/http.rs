@@ -1055,13 +1055,27 @@ fn code_with_minus_r_and_scripts_with_a_shebang_run_as_with_php() {
 }
 
 #[test]
-fn the_built_in_composer_runs() {
-    let output = Command::new(env!("CARGO_BIN_EXE_tenma"))
-        .args(["composer", "--version"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("Composer version 2."));
+fn tenma_composer_asks_for_an_install_first() {
+    // An empty data directory: no Composer installed, nothing fetched
+    let data = std::env::temp_dir().join(format!("tenma-composer-{}", std::process::id()));
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_tenma"))
+            .args(args)
+            .env("XDG_DATA_HOME", &data)
+            .output()
+            .unwrap();
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    let missing = (
+        Some(1),
+        "tenma: Composer is not installed: tenma install composer\n".to_owned(),
+    );
+    assert_eq!(run(&["composer", "--version"]), missing);
+    assert_eq!(run(&["update", "composer"]), missing);
+    assert_eq!(run(&["remove", "composer"]), missing);
 }
 
 #[test]

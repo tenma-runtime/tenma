@@ -7,10 +7,6 @@ fn main() {
     let php = root.join("php-build/out");
     let config = php.join("bin/php-config");
     assert!(config.exists(), "PHP missing: run php-build/build.sh first");
-    assert!(
-        php.join("composer.phar").exists(),
-        "Composer missing: run php-build/build.sh again"
-    );
 
     let run = |option: &str| -> String {
         let output = Command::new(&config)
@@ -75,7 +71,6 @@ fn main() {
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=shim/tenma.c");
     println!("cargo:rerun-if-changed=php-build/out/lib/libphp.a");
-    println!("cargo:rerun-if-changed=php-build/out/composer.phar");
 
     embed_stdlib(&root);
 }

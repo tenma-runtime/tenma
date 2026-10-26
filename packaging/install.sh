@@ -1,6 +1,7 @@
 #!/bin/sh
 # Installs the latest tenma: curl -fsSL https://raw.githubusercontent.com/tenma-runtime/tenma/main/packaging/install.sh | sh
 # macOS through Homebrew (the binary links Homebrew's libraries), Debian 13 and Ubuntu 24.04 through their .deb,
+# Enterprise Linux 10 (CentOS Stream, RHEL, AlmaLinux, Rocky) through its .rpm with EPEL,
 # any other Linux as the binary in ~/.local/bin (TENMA_DIR), with a list of the libraries it still misses.
 # TENMA_VERSION=0.1.2 installs that version on Linux.
 set -eu
@@ -42,6 +43,17 @@ if command -v apt-get >/dev/null; then
   sudo=""; [ "$(id -u)" = 0 ] || sudo=sudo
   # apt resolves the libraries; on a release without them (older Debian or Ubuntu) it says which are missing
   $sudo apt-get install -y "$temp/$deb"
+elif command -v dnf >/dev/null && grep -qx 'PLATFORM_ID="platform:el10"' /etc/os-release; then
+  # Enterprise Linux 10 has its own build; some of the libraries it links come from EPEL,
+  # which RHEL itself does not carry as a package
+  rpm="tenma-$version-1.el10.$(uname -m).rpm"
+  curl -fsSL -o "$temp/$rpm" "$download/$rpm"
+  sudo=""; [ "$(id -u)" = 0 ] || sudo=sudo
+  if ! rpm -q epel-release >/dev/null; then
+    $sudo dnf install -y epel-release \
+      || $sudo dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm
+  fi
+  $sudo dnf install -y "$temp/$rpm"
 else
   dir=${TENMA_DIR:-$HOME/.local/bin}
   curl -fsSL "$download/tenma-linux-$arch.tar.gz" | tar xz -C "$temp"

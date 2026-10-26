@@ -29,6 +29,7 @@ The script picks the way that fits your system:
 | macOS on Apple Silicon | `brew install tenma-runtime/tap/tenma`                                                       |
 | Debian 13              | `apt install ./tenma_<version>_amd64.deb` from the release                                   |
 | Ubuntu 24.04           | `apt install ./tenma_<version>_ubuntu24.04_amd64.deb` from the release                       |
+| Enterprise Linux 10    | `dnf install epel-release`, then `dnf install ./tenma-<version>-1.el10.x86_64.rpm`           |
 | other Linux            | `tenma-linux-x64.tar.gz` from the [release](https://github.com/tenma-runtime/tenma/releases) |
 | Docker                 | `docker run -p 8080:8080 -v "$PWD:/app" ghcr.io/tenma-runtime/tenma /app/index.php`          |
 

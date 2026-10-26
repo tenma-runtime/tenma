@@ -133,9 +133,37 @@ jobs:
           name: tenma-ubuntu-${{ matrix.arch }}
           path: tenma_*.deb
 
+  # The .rpm for Enterprise Linux 10: CentOS Stream, RHEL, AlmaLinux and Rocky
+  el10:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f packaging/el10.Dockerfile -t tenma-el10 .
+      - run: docker run --rm -e USER=root tenma-el10 cargo test --release -- --test-threads 4
+      - run: |
+          version=0.0.0; case "$GITHUB_REF" in refs/tags/v*) version=${GITHUB_REF_NAME#v};; esac
+          docker run --rm -v "$PWD:/out" tenma-el10 packaging/rpm.sh "$version" /out
+      # The package installs on a bare system with EPEL and its binary starts: dnf found every library it links
+      - run: |
+          docker run --rm -v "$PWD:/out" quay.io/centos/centos:stream10 sh -c \
+            'dnf install -y epel-release >/dev/null && dnf install -y /out/tenma-*.rpm >/dev/null \
+              && echo "<?php echo PHP_VERSION;" > /tmp/v.php && tenma /tmp/v.php'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tenma-el10-${{ matrix.arch }}
+          path: tenma-*.rpm
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [macos, linux, ubuntu]
+    needs: [macos, linux, ubuntu, el10]
     runs-on: ubuntu-24.04
     env:
       TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
@@ -151,7 +179,7 @@ jobs:
             docker buildx imagetools create -t ghcr.io/tenma-runtime/tenma:$tag \
               ghcr.io/tenma-runtime/tenma:$version-x64 ghcr.io/tenma-runtime/tenma:$version-arm64
           done
-      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes tenma-*.tar.gz tenma_*.deb
+      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes tenma-*.tar.gz tenma_*.deb tenma-*.rpm
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # tenma-runtime/homebrew-tap: GITHUB_TOKEN may only write this repo, TAP_TOKEN is a token with write access to the tap

@@ -142,7 +142,7 @@ WantedBy=multi-user.target
 - `ExecStartPre` runs a task of the same script before every start, here the migrations.
 - With `--tls-cert`, add `ExecReload=/bin/kill -HUP $MAINPID`: `systemctl reload app` then reads a renewed certificate without a restart. Without `--tls-cert`, SIGHUP ends Tenma.
 - `TimeoutStopSec` is above Tenma's 10-second drain, so running requests can finish.
-- The `.deb` installs the binary as `/usr/bin/tenma`. The tarball installs it into `~/.local/bin`; use that path instead.
+- The `.deb` and the `.rpm` install the binary as `/usr/bin/tenma`. The tarball installs it into `~/.local/bin`; use that path instead.
 
 ## Homebrew
 

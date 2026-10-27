@@ -13,5 +13,4 @@ use Io\App;
 $app = App::create();
 $app->attach([HomeController::class, WaypointController::class]);
 
-new Http\Server(8080, $app)->start();
-echo "Io on tenma: http://localhost:8080\n";
+$app->serve();

@@ -47,6 +47,8 @@ class WaypointController
         $dLat = deg2rad($to['lat'] - $from['lat']);
         $dLon = deg2rad($to['lon'] - $from['lon']);
         $a = sin($dLat / 2) ** 2 + cos(deg2rad($from['lat'])) * cos(deg2rad($to['lat'])) * sin($dLon / 2) ** 2;
+        // Rounding can push near-antipodal points just above 1, and asin() would return NAN
+        $a = min(1.0, $a);
         return ['from' => $from['name'], 'to' => $to['name'], 'km' => round(2 * 6371 * asin(sqrt($a)), 1)];
     }
 }

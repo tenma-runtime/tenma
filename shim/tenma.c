@@ -1039,7 +1039,7 @@ static int async_set_option(php_stream *stream, int option, int value, void *ptr
         if (xparam->op != STREAM_XPORT_OP_CONNECT && xparam->op != STREAM_XPORT_OP_CONNECT_ASYNC) {
             return ops->set_option(stream, option, value, ptrparam);
         }
-        int wanted = xparam->op;
+        int asked = xparam->op;
         // ext/openssl would start the handshake on the connecting socket, which fails on macOS: after the
         // connect instead, below
         struct ssl_stream *ssl = is_ssl_stream(stream) ? stream->abstract : NULL;
@@ -1047,6 +1047,10 @@ static int async_set_option(php_stream *stream, int option, int value, void *ptr
         if (ssl != NULL) {
             ssl->enable_on_connect = 0;
         }
+        // A TLS client has no asynchronous connect here: the handshake needs the connected socket, and a
+        // stream handed out before it would send in cleartext. So it waits for the connect (only the fiber)
+        // and shakes hands, as the synchronous connect does
+        int wanted = ssl != NULL && enable ? STREAM_XPORT_OP_CONNECT : asked;
         xparam->op = STREAM_XPORT_OP_CONNECT_ASYNC;
         int result = ops->set_option(stream, option, value, ptrparam);
         xparam->op = wanted;
@@ -1071,12 +1075,13 @@ static int async_set_option(php_stream *stream, int option, int value, void *ptr
         if (sock->socket != -1) {
             php_set_sock_blocking(sock->socket, 0);
         }
-        if (xparam->outputs.returncode == 0 && ssl != NULL && enable && wanted == STREAM_XPORT_OP_CONNECT) {
+        if (xparam->outputs.returncode == 0 && ssl != NULL && enable) {
             if (php_stream_xport_crypto_setup(stream, ssl->method, NULL) < 0 || php_stream_xport_crypto_enable(stream, 1) < 0) {
                 php_error_docref(NULL, E_WARNING, "Failed to enable crypto");
                 xparam->outputs.returncode = -1;
             }
         }
+        xparam->op = asked;
         return result;
     }
     if (option == PHP_STREAM_OPTION_CRYPTO_API) {

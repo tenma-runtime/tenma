@@ -74,6 +74,25 @@ new Server($port, function (Request $request) use ($ask, $port, $echo) {
             fwrite($socket, "GET /slow HTTP/1.0\r\nHost: localhost\r\n\r\n");
             $response = stream_get_contents($socket);
             return 'tls ' . trim(substr($response, -5)) . ' ' . $seconds() . "\n";
+        case '/tls-async':
+            // An asynchronous connect of a TLS client shakes hands too, before the first write
+            $context = stream_context_create(['ssl' => ['cafile' => __DIR__ . '/tls/ca.pem']]);
+            $socket = stream_socket_client("tls://localhost:$port", $errno, $error, 2, STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT, $context);
+            if ($socket === false) {
+                return "fail $error\n";
+            }
+            $meta = stream_get_meta_data($socket);
+            fwrite($socket, "GET /slow HTTP/1.0\r\nHost: localhost\r\n\r\n");
+            $response = stream_get_contents($socket);
+            return 'tls ' . trim(substr($response, -5)) . ' crypto=' . ($meta['crypto']['protocol'] ?? 'none') . "\n";
+        case '/tls-async-plain':
+            // Against a server without TLS the handshake fails: nothing goes out in cleartext
+            $socket = @stream_socket_client("tls://127.0.0.1:$echo", $errno, $error, 2, STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT);
+            if ($socket === false) {
+                return "refused\n";
+            }
+            @fwrite($socket, "secret\n");
+            return 'connected ' . var_export(@fgets($socket), true) . "\n";
         case '/unverified':
             $socket = @stream_socket_client("tls://localhost:$port", $errno, $error, 2);
             return ($socket === false ? 'refused' : 'connected') . "\n";

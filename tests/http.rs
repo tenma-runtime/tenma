@@ -4512,6 +4512,13 @@ fn php_sockets_suspend_only_the_fiber() {
     timed(&tail("/https"), "slowslow", 0.9);
     timed(&tail("/tls"), "tls slow", 0.9);
     assert_eq!(tail("/unverified"), "refused\n");
+    // An asynchronous connect shakes hands as well; a server without TLS gets no cleartext
+    let asynchronous = tail("/tls-async");
+    assert!(
+        asynchronous.starts_with("tls slow crypto=TLS"),
+        "{asynchronous}"
+    );
+    assert_eq!(tail("/tls-async-plain"), "refused\n");
     // ECONNREFUSED is 61 on macOS and 111 on Linux
     let refused = tail("/refused");
     assert!(

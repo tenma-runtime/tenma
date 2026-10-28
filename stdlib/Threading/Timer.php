@@ -7,6 +7,8 @@ final class Timer
 {
     private int $op = 0;
     private bool $cancelled = false;
+    /** For loop(): the wait before the next call, as the last call returned it */
+    private int $wait;
     /** The request the timer was set in: if the client leaves, the timer ends too. */
     private readonly ?int $request;
     /** @var array<int, mixed> AsyncLocal values from where the timer was set */
@@ -53,11 +55,29 @@ final class Timer
         return $timer;
     }
 
+    /**
+     * Calls $callback after $first seconds, then again after as many seconds as each call returns: 600 to look
+     * again in ten minutes, 3600 after a rate limit, null to stop. The wait starts when a call ends, so calls
+     * never overlap. A call that throws keeps the loop, with the wait of the call before; the error is reported
+     * as from any task. Keeps a script without a server alive until it stops or cancel().
+     *
+     * @param callable(): (float|int|null) $callback
+     */
+    public static function loop(callable $callback, float $first = 0): self
+    {
+        $timer = new self($callback(...), \Tenma\Internal\milliseconds($first), false, true);
+        \Tenma\Internal\Loop::$running && \Tenma\Internal\requireFiber();
+        \Tenma\Internal\whenRunning($timer->arm(...));
+        return $timer;
+    }
+
     private function __construct(
         private readonly \Closure $callback,
         private readonly int $milliseconds,
         private readonly bool $repeat,
+        private readonly bool $loop = false,
     ) {
+        $this->wait = $milliseconds;
         $this->request = \Tenma\Internal\Current::$request;
         $this->context = \Tenma\Internal\context();
         if ($this->request !== null) {
@@ -78,7 +98,7 @@ final class Timer
         if ($this->cancelled) {
             return;
         }
-        $this->op = \tenma_op_sleep($this->milliseconds);
+        $this->op = \tenma_op_sleep($this->wait);
         if ($this->op !== 0) {
             \Tenma\Internal\Waiting::$timers[$this->op] = $this;
         }
@@ -91,6 +111,10 @@ final class Timer
         if ($this->cancelled) {
             return;
         }
+        if ($this->loop) {
+            Task::start($this->round(...), null, $this->context, 'Loop');
+            return;
+        }
         if ($this->repeat) {
             $this->arm();
         } else {
@@ -99,6 +123,26 @@ final class Timer
         // The callback runs as background work, as before (exit() inside it ends Tenma); only the
         // wait until then belongs to the request
         Task::start($this->callback, null, $this->context, $this->repeat ? 'Interval' : 'Timer');
+    }
+
+    /** One call of loop(), then the wait it asked for */
+    private function round(): void
+    {
+        try {
+            $next = ($this->callback)();
+        } catch (\Throwable $error) {
+            $this->arm();
+            throw $error;
+        }
+        if ($this->cancelled) {
+            return;
+        }
+        if ($next === null) {
+            $this->forget();
+            return;
+        }
+        $this->wait = \Tenma\Internal\milliseconds(is_int($next) || is_float($next) ? (float) $next : 0.0);
+        $this->arm();
     }
 
     /** Stops the timer; a callback already running runs to completion. */

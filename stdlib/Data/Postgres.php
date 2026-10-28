@@ -23,24 +23,34 @@ final class Postgres
     }
 
     /**
-     * Rows as a list of associative arrays, values with Postgres' JSON types. SHOW, EXPLAIN and FETCH
-     * take no parameters and return every value as a string.
+     * Rows as a list of associative arrays, values with Postgres' JSON types; with $as each row goes through it
+     * instead: `as: Row::of(...)` for typed getters, `as: Order::from(...)` for objects,
+     * `as: fn (array $row) => (string) $row['name']` for one column. SHOW, EXPLAIN and FETCH take no
+     * parameters and return every value as a string.
      *
+     * @template T
      * @param list<mixed> $params
-     * @return list<array<string, mixed>>
+     * @param (callable(array<string, mixed>): T)|null $as
+     * @return ($as is null ? list<array<string, mixed>> : list<T>)
      */
-    public function query(string $sql, array $params = []): array
+    public function query(string $sql, array $params = [], ?callable $as = null): array
     {
-        return $this->call('query', $sql, $params);
+        $rows = $this->call('query', $sql, $params);
+        return $as === null ? $rows : array_map($as, $rows);
     }
 
     /**
+     * The first row, or null; with $as it goes through $as as in query().
+     *
+     * @template T
      * @param list<mixed> $params
-     * @return array<string, mixed>|null
+     * @param (callable(array<string, mixed>): T)|null $as
+     * @return ($as is null ? array<string, mixed>|null : T|null)
      */
-    public function first(string $sql, array $params = []): ?array
+    public function first(string $sql, array $params = [], ?callable $as = null): mixed
     {
-        return $this->query($sql, $params)[0] ?? null;
+        $row = $this->query($sql, $params)[0] ?? null;
+        return $row === null || $as === null ? $row : $as($row);
     }
 
     /**

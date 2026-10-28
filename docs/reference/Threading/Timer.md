@@ -50,6 +50,24 @@ $overlap false a tick is skipped while the previous call still runs.
 
 **Returns** [`Timer`](Timer.md)
 
+### loop()
+
+```php
+public static function loop(callable $callback, float $first = 0.0): \Threading\Timer
+```
+
+Calls $callback after $first seconds, then again after as many seconds as each call returns: 600 to look
+again in ten minutes, 3600 after a rate limit, null to stop. The wait starts when a call ends, so calls
+never overlap. A call that throws keeps the loop, with the wait of the call before; the error is reported
+as from any task. Keeps a script without a server alive until it stops or cancel().
+
+**Parameters**
+
+- `$callback` `callable(): (float|int|null)`
+- `$first` `float`
+
+**Returns** [`Timer`](Timer.md)
+
 ### cancel()
 
 ```php

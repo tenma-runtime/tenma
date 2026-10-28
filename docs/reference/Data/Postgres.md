@@ -34,31 +34,45 @@ public static function connect(string $url): \Data\Postgres
 ### query()
 
 ```php
-public function query(string $sql, array $params = []): array
+public function query(string $sql, array $params = [], ?callable $as = null): array
 ```
 
-Rows as a list of associative arrays, values with Postgres' JSON types. SHOW, EXPLAIN and FETCH
-take no parameters and return every value as a string.
+Rows as a list of associative arrays, values with Postgres' JSON types; with $as each row goes through it
+instead: `as: Row::of(...)` for typed getters, `as: Order::from(...)` for objects,
+`as: fn (array $row) => (string) $row['name']` for one column. SHOW, EXPLAIN and FETCH take no
+parameters and return every value as a string.
 
 **Parameters**
 
 - `$sql` `string`
 - `$params` `list<mixed>`
+- `$as` `(callable(array<string, mixed>): T)|null`
 
-**Returns** `list<array<string, mixed>>`
+**Returns** `($as is null ? list<array<string, mixed>> : list<T>)`
+
+**Template parameters**
+
+- `T`
 
 ### first()
 
 ```php
-public function first(string $sql, array $params = []): ?array
+public function first(string $sql, array $params = [], ?callable $as = null): mixed
 ```
+
+The first row, or null; with $as it goes through $as as in query().
 
 **Parameters**
 
 - `$sql` `string`
 - `$params` `list<mixed>`
+- `$as` `(callable(array<string, mixed>): T)|null`
 
-**Returns** `array<string, mixed>|null`
+**Returns** `($as is null ? array<string, mixed>|null : T|null)`
+
+**Template parameters**
+
+- `T`
 
 ### script()
 

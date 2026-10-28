@@ -26,4 +26,9 @@ use Data\{Migrations, Postgres};
     }
     echo 'rows ', $db->first("SELECT count(*) AS n FROM {$table}_items")['n'] ?? '?', "\n";
     $db->script("DROP TABLE {$table}_items; DROP TABLE $table");
+    // query() and first() with a mapper
+    $name = fn (array $row): string => 'n' . $row['x'];
+    echo implode(',', $db->query('SELECT x FROM generate_series(1, 3) x', [], as: $name)), "\n";
+    echo 'first ', $db->first('SELECT 1 AS x', as: $name), "\n";
+    echo $db->first('SELECT 1 AS x WHERE false', as: $name) ?? 'none', "\n";
 });

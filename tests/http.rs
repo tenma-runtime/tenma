@@ -880,7 +880,7 @@ fn migrations_apply_once_in_order_and_all_or_nothing() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         stdout,
-        "001_items,002_one\nagain nothing\nbroken step failed\nrows 1\n"
+        "001_items,002_one\nagain nothing\nbroken step failed\nrows 1\nn1,n2,n3\nfirst n1\nnone\n"
     );
 }
 
@@ -1588,7 +1588,7 @@ fn timers_and_background_work_like_in_node() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "script done\nbackground done\nticks 3\nslow calls 2\nnested\n"
+        "script done\nbackground done\nticks 3\nslow calls 2\nrounds 3\ncancelled loop stopped\nnested\n"
     );
     assert!(
         started.elapsed() < Duration::from_secs(2),

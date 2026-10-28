@@ -25,10 +25,29 @@ final class Timer
         return $timer;
     }
 
-    /** Calls $callback every $seconds seconds until cancel(); keeps a script without a server alive. */
-    public static function every(float $seconds, callable $callback): self
+    /**
+     * Calls $callback every $seconds seconds until cancel(); keeps a script without a server alive. The clock
+     * does not wait for the callback: a call that waits longer than $seconds overlaps the next one. With
+     * $overlap false a tick is skipped while the previous call still runs.
+     */
+    public static function every(float $seconds, callable $callback, bool $overlap = true): self
     {
-        $timer = new self($callback(...), \Tenma\Internal\milliseconds($seconds, 1), true);
+        $callback = $callback(...);
+        if (!$overlap) {
+            $running = false;
+            $callback = static function () use (&$running, $callback): void {
+                if ($running) {
+                    return;
+                }
+                $running = true;
+                try {
+                    $callback();
+                } finally {
+                    $running = false;
+                }
+            };
+        }
+        $timer = new self($callback, \Tenma\Internal\milliseconds($seconds, 1), true);
         \Tenma\Internal\Loop::$running && \Tenma\Internal\requireFiber();
         \Tenma\Internal\whenRunning($timer->arm(...));
         return $timer;

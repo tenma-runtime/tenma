@@ -5,6 +5,8 @@ namespace Data;
 /**
  * Postgres, asynchronous: while a query runs, only this request's Fiber waits.
  * Placeholders $1, $2, … as in Postgres; parameters are sent as text, the server determines the type.
+ * A PHP list for an array parameter (`$1::text[]`, `= ANY ($1::int[])`) goes as an array, quoted and
+ * escaped; for json or jsonb it stays JSON.
  * Only in asynchronous code (handlers, tasks, timers); at script startup, wrap queries in Task::run().
  */
 final class Postgres

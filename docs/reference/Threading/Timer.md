@@ -35,15 +35,18 @@ workers, each worker schedules its own timers, also after every restart.
 ### every()
 
 ```php
-public static function every(float $seconds, callable $callback): \Threading\Timer
+public static function every(float $seconds, callable $callback, bool $overlap = true): \Threading\Timer
 ```
 
-Calls $callback every $seconds seconds until cancel(); keeps a script without a server alive.
+Calls $callback every $seconds seconds until cancel(); keeps a script without a server alive. The clock
+does not wait for the callback: a call that waits longer than $seconds overlaps the next one. With
+$overlap false a tick is skipped while the previous call still runs.
 
 **Parameters**
 
 - `$seconds` `float`
 - `$callback` `callable`
+- `$overlap` `bool`
 
 **Returns** [`Timer`](Timer.md)
 

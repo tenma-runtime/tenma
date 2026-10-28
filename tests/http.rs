@@ -1564,7 +1564,7 @@ fn timers_and_background_work_like_in_node() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "script done\nbackground done\nticks 3\nnested\n"
+        "script done\nbackground done\nticks 3\nslow calls 2\nnested\n"
     );
     assert!(
         started.elapsed() < Duration::from_secs(2),

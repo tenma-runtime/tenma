@@ -11,8 +11,16 @@ $interval = \Threading\Timer::every(0.02, function () use (&$ticks, &$interval) 
     \Threading\Task::delay(0.05);
     echo "background done\n";
 });
-\Threading\Timer::after(0.15, function () use (&$ticks) {
+// A call that waits longer than the interval: without overlap the ticks in between are skipped
+$calls = 0;
+$slow = \Threading\Timer::every(0.02, function () use (&$calls) {
+    $calls++;
+    \Threading\Task::delay(0.07);
+}, overlap: false);
+\Threading\Timer::after(0.13, fn () => $slow->cancel());
+\Threading\Timer::after(0.15, function () use (&$ticks, &$calls) {
     echo "ticks $ticks\n";
+    echo "slow calls $calls\n";
     \Threading\Timer::after(0.01, fn () => print("nested\n"));
 });
 echo "script done\n";

@@ -16,7 +16,7 @@ use bytes::BytesMut;
 use serde_json::Value;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_postgres::error::SqlState;
-use tokio_postgres::types::{Format, IsNull, ToSql, Type, to_sql_checked};
+use tokio_postgres::types::{Format, IsNull, Kind, ToSql, Type, to_sql_checked};
 use tokio_postgres::{Client, NoTls, Statement};
 
 use crate::ops;
@@ -147,18 +147,78 @@ impl ToSql for TextParam {
     to_sql_checked!();
 }
 
-fn text_params(params: &[Value]) -> Vec<TextParam> {
+/// A parameter from Data\Postgres: its text, and for a PHP list also the Postgres array literal, which is
+/// what goes out when the statement's parameter is an array (`$1::text[]`, `= ANY ($1)`). Any other type
+/// gets the text: a list for a json or jsonb parameter stays JSON, as before.
+#[derive(Debug)]
+struct ValueParam {
+    text: Option<String>,
+    array: Option<String>,
+}
+
+impl ToSql for ValueParam {
+    fn to_sql(&self, ty: &Type, out: &mut BytesMut) -> Result<IsNull, Failure> {
+        let text = match (ty.kind(), &self.array) {
+            (Kind::Array(_), Some(array)) => Some(array),
+            _ => self.text.as_ref(),
+        };
+        match text {
+            Some(text) => {
+                out.extend_from_slice(text.as_bytes());
+                Ok(IsNull::No)
+            }
+            None => Ok(IsNull::Yes),
+        }
+    }
+
+    fn accepts(_: &Type) -> bool {
+        true
+    }
+
+    fn encode_format(&self, _: &Type) -> Format {
+        Format::Text
+    }
+
+    to_sql_checked!();
+}
+
+fn text_params(params: &[Value]) -> Vec<ValueParam> {
     params
         .iter()
-        .map(|value| {
-            TextParam(match value {
+        .map(|value| ValueParam {
+            text: match value {
                 Value::Null => None,
                 Value::Bool(flag) => Some(if *flag { "1" } else { "0" }.into()),
                 Value::String(text) => Some(text.clone()),
                 other => Some(other.to_string()),
-            })
+            },
+            array: match value {
+                Value::Array(items) => Some(array_literal(items)),
+                _ => None,
+            },
         })
         .collect()
+}
+
+/// A JSON list as a Postgres array literal: `{"a","b \"c\"",NULL,1,t}`; nested lists as nested arrays,
+/// objects as their JSON text.
+fn array_literal(items: &[Value]) -> String {
+    let elements: Vec<String> = items
+        .iter()
+        .map(|item| match item {
+            Value::Null => "NULL".to_owned(),
+            Value::Bool(flag) => if *flag { "t" } else { "f" }.to_owned(),
+            Value::Number(number) => number.to_string(),
+            Value::Array(inner) => array_literal(inner),
+            Value::String(text) => quoted(text),
+            Value::Object(_) => quoted(&item.to_string()),
+        })
+        .collect();
+    format!("{{{}}}", elements.join(","))
+}
+
+fn quoted(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 const POOL_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -470,7 +530,21 @@ fn decimal(number: &str) -> (bool, String, i64) {
 
 #[cfg(test)]
 mod tests {
-    use super::exact_numbers;
+    use super::{array_literal, exact_numbers};
+
+    #[test]
+    fn lists_become_postgres_array_literals() {
+        // The values: a, b "c", back\slash, null, 1, true, [2, 3], {"k": 1}
+        let list: serde_json::Value = serde_json::from_str(
+            r#"["a", "b \"c\"", "back\\slash", null, 1, true, [2, 3], {"k": 1}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            array_literal(list.as_array().unwrap()),
+            r#"{"a","b \"c\"","back\\slash",NULL,1,t,{2,3},"{\"k\":1}"}"#
+        );
+        assert_eq!(array_literal(&[]), "{}");
+    }
 
     #[test]
     fn numbers_a_float_cannot_hold_become_strings() {

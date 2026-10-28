@@ -70,6 +70,11 @@ new Server((int) getenv('PORT'), function (Request $request) use ($connect) {
             $emulated->execute(['a' => "q'1", 'b' => 7]);
             $meta = $positional->getColumnMeta(1);
             return Response::json([$positional->fetch(PDO::FETCH_NUM), $emulated->fetch(PDO::FETCH_ASSOC), $meta['native_type'], $pdo->quote("it's")]);
+        case '/numbers':
+            // Numbers sit in the packed result buffer right before the next value's length: a 50-byte text after an
+            // int, a 53-byte text after a float, and a 52-byte text at the start of the next row must not add digits
+            $rows = $connect()->query("SELECT 12 AS a, repeat('x', 50) AS b, 1.5::float8 AS c, repeat('y', 53) AS d, 7 AS e UNION ALL SELECT 3, repeat('q', 52), 2.25, '', 9 ORDER BY 1 DESC")->fetchAll(PDO::FETCH_ASSOC);
+            return implode('|', array_map(fn (array $row) => "$row[a] $row[c] $row[e]", $rows)) . "\n";
         case '/scroll':
             $statement = $connect()->prepare('SELECT generate_series(1, 5) AS n', [PDO::ATTR_CURSOR => PDO::CURSOR_SCROLL]);
             $statement->execute();

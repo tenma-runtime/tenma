@@ -4493,6 +4493,7 @@ fn pdo_pgsql_runs_on_tokio_postgres() {
             && placeholders.contains(r#""'it''s'""#),
         "{placeholders}"
     );
+    assert_eq!(body(get(port, "/numbers")), "12 1.5 7|3 2.25 9\n");
     assert!(get(port, "/scroll").ends_with("5 3 2 UTF8\n"));
     let modifying = get(port, "/modifying-with");
     assert!(modifying.ends_with("Pie 1\n"), "{modifying}");

@@ -1907,6 +1907,19 @@ static zend_string *pg_unescape_bytea(const char *text, size_t len) {
     return bytes;
 }
 
+/**
+ * A number's text, NUL-terminated: the result buffer packs the values back to back, with the next value's length
+ * right after each one, so strtol and strtod must not read past len. No Postgres number is longer than 31 bytes.
+ */
+static const char *pg_number_text(const char *value, size_t len, char buffer[32]) {
+    if (len > 31) {
+        len = 31;
+    }
+    memcpy(buffer, value, len);
+    buffer[len] = '\0';
+    return buffer;
+}
+
 static int pg_stmt_get_col(pdo_stmt_t *stmt, int colno, zval *result, enum pdo_param_type *type) {
     tenma_pg_stmt *S = stmt->driver_data;
     if (S->buffer == NULL || S->current == 0 || colno < 0 || (uint32_t) colno >= S->columns) {
@@ -1918,6 +1931,7 @@ static int pg_stmt_get_col(pdo_stmt_t *stmt, int colno, zval *result, enum pdo_p
         ZVAL_NULL(result);
         return 1;
     }
+    char number[32];
     switch (S->oids[colno]) {
         case PG_BOOLOID:
             ZVAL_BOOL(result, len > 0 && value[0] == 't');
@@ -1926,7 +1940,7 @@ static int pg_stmt_get_col(pdo_stmt_t *stmt, int colno, zval *result, enum pdo_p
         case PG_INT4OID:
         case PG_INT8OID:
         case PG_OIDOID:
-            ZVAL_LONG(result, ZEND_STRTOL(value, NULL, 10));
+            ZVAL_LONG(result, ZEND_STRTOL(pg_number_text(value, len, number), NULL, 10));
             break;
         case PG_FLOAT4OID:
         case PG_FLOAT8OID:
@@ -1937,7 +1951,7 @@ static int pg_stmt_get_col(pdo_stmt_t *stmt, int colno, zval *result, enum pdo_p
             } else if (len == 3 && memcmp(value, "NaN", 3) == 0) {
                 ZVAL_DOUBLE(result, ZEND_NAN);
             } else {
-                ZVAL_DOUBLE(result, zend_strtod(value, NULL));
+                ZVAL_DOUBLE(result, zend_strtod(pg_number_text(value, len, number), NULL));
             }
             break;
         case PG_BYTEAOID: {

@@ -4321,8 +4321,78 @@ fn http2_streams_share_the_body_limit() {
     let _ = std::fs::remove_dir_all(directory);
 }
 
-/// An HTTP/2 connection to the test server, ready for requests.
-async fn http2_connect(port: u16) -> h2::client::SendRequest<bytes::Bytes> {
+#[test]
+fn http2_connections_without_a_stream_are_closed_after_the_request_timeout() {
+    let port = 18_203;
+    let directory = scratch("http2-idle");
+    let app = directory.join("app.php");
+    std::fs::write(
+        &app,
+        format!(
+            "<?php\n(new \\Http\\Server({port}, function ($request) {{\n    if ($request->path === '/slow') {{\n        \\Threading\\Task::delay(1.5);\n    }}\n    return \"ok\\n\";\n}}))->start();\n"
+        ),
+    )
+    .unwrap();
+    let _server = Server(
+        Command::new(env!("CARGO_BIN_EXE_tenma"))
+            .args([
+                "--request-timeout",
+                "1",
+                "--tls-cert",
+                "tests/fixtures/tls/cert.pem",
+                "--tls-key",
+                "tests/fixtures/tls/key.pem",
+            ])
+            .arg(&app)
+            .spawn()
+            .unwrap(),
+    );
+    assert!(get_tls(port, "/").ends_with("\r\n\r\nok\n"));
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Nothing after the handshake, or only the preface: the connection is closed as an HTTP/1.1
+        // connection without a request is, after --request-timeout
+        for preface in [&b""[..], b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"] {
+            let mut stream = http2_tls_stream(port).await;
+            stream.write_all(preface).await.unwrap();
+            let started = Instant::now();
+            let mut buffer = [0u8; 1024];
+            let closed = tokio::time::timeout(Duration::from_secs(4), async {
+                loop {
+                    match stream.read(&mut buffer).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {}
+                    }
+                }
+            })
+            .await;
+            assert!(closed.is_ok(), "still open after {:?}", started.elapsed());
+            assert!(
+                started.elapsed() >= Duration::from_millis(900),
+                "{:?}",
+                started.elapsed()
+            );
+        }
+
+        // A stream that runs longer than the timeout is no idle connection
+        let mut client = http2_connect(port).await;
+        let request = hyper::Request::get(format!("https://localhost:{port}/slow"))
+            .body(())
+            .unwrap();
+        let (response, _) = client.send_request(request, true).unwrap();
+        assert_eq!(response.await.unwrap().status(), 200);
+    });
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+/// A TLS connection to the test server that negotiated h2, before the HTTP/2 handshake.
+async fn http2_tls_stream(port: u16) -> tokio_rustls::client::TlsStream<tokio::net::TcpStream> {
     use rustls::pki_types::CertificateDer;
     use rustls::pki_types::pem::PemObject;
 
@@ -4345,7 +4415,12 @@ async fn http2_connect(port: u16) -> h2::client::SendRequest<bytes::Bytes> {
     let name = "localhost".try_into().unwrap();
     let stream = connector.connect(name, socket).await.unwrap();
     assert_eq!(stream.get_ref().1.alpn_protocol(), Some(&b"h2"[..]));
+    stream
+}
 
+/// An HTTP/2 connection to the test server, ready for requests.
+async fn http2_connect(port: u16) -> h2::client::SendRequest<bytes::Bytes> {
+    let stream = http2_tls_stream(port).await;
     let (client, connection) = h2::client::handshake(stream).await.unwrap();
     tokio::spawn(connection);
     client.ready().await.unwrap()

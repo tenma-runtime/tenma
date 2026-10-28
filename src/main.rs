@@ -1596,23 +1596,132 @@ async fn serve_h2<S, H>(
     mut drained: tokio::sync::watch::Receiver<()>,
 ) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + 'static,
-    H: hyper::service::HttpService<Incoming, ResBody = ResponseBody>,
-    LocalExecutor: hyper::rt::bounds::Http2ServerConnExec<H::Future, ResponseBody>,
+    H: hyper::service::Service<Request<Incoming>, Response = Response<ResponseBody>>,
+    H::Error: Into<Box<dyn std::error::Error + Send + Sync>> + 'static,
+    H::Future: 'static,
 {
     // ponytail: --request-timeout covers stalled writes here, not slow request headers; hyper's
-    // HTTP/2 server has no header timeout per stream, a keep-alive ping would close dead connections
+    // HTTP/2 server has no header timeout per stream
     let stream = WriteTimeout::new(stream, options.request_timeout);
+    let streams = Rc::new(Streams {
+        open: Cell::new(0),
+        idle_since: Cell::new(tokio::time::Instant::now()),
+    });
+    let service = Counted {
+        service,
+        streams: Rc::clone(&streams),
+    };
     let connection = hyper::server::conn::http2::Builder::new(LocalExecutor)
         .timer(hyper_util::rt::TokioTimer::new())
         .max_concurrent_streams(MAX_H2_STREAMS)
         .serve_connection(TokioIo::new(stream), service);
     tokio::pin!(connection);
+    // As an HTTP/1.1 connection without a request: a connection without an open stream, from the handshake
+    // on, is closed once --request-timeout has passed, however many connections a client opens. A stream
+    // that runs longer keeps it open. Checked at most once per timeout, so the idle time is up to twice it
+    let idle = async {
+        loop {
+            let timeout = options.request_timeout;
+            let deadline = if streams.open.get() == 0 {
+                streams.idle_since.get() + timeout
+            } else {
+                tokio::time::Instant::now() + timeout
+            };
+            tokio::time::sleep_until(deadline).await;
+            if streams.open.get() == 0 && streams.idle_since.get().elapsed() >= timeout {
+                break;
+            }
+        }
+    };
     tokio::select! {
         _ = connection.as_mut() => {}
+        _ = idle => {}
         _ = drained.changed() => {
             connection.as_mut().graceful_shutdown();
             let _ = connection.await;
         }
+    }
+}
+
+/// The open streams of an HTTP/2 connection, and since when it has none.
+struct Streams {
+    open: Cell<usize>,
+    idle_since: Cell<tokio::time::Instant>,
+}
+
+/// A stream from its request until its response body is done or dropped.
+struct Stream(Rc<Streams>);
+
+impl Stream {
+    fn begin(streams: &Rc<Streams>) -> Self {
+        streams.open.set(streams.open.get() + 1);
+        Self(Rc::clone(streams))
+    }
+}
+
+impl Drop for Stream {
+    fn drop(&mut self) {
+        let open = self.0.open.get() - 1;
+        self.0.open.set(open);
+        if open == 0 {
+            self.0.idle_since.set(tokio::time::Instant::now());
+        }
+    }
+}
+
+/// The connection's service, whose responses carry their stream's guard until the body is done.
+struct Counted<H> {
+    service: H,
+    streams: Rc<Streams>,
+}
+
+impl<H> hyper::service::Service<Request<Incoming>> for Counted<H>
+where
+    H: hyper::service::Service<Request<Incoming>, Response = Response<ResponseBody>>,
+    H::Future: 'static,
+{
+    type Response = Response<CountedBody>;
+    type Error = H::Error;
+    type Future =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    fn call(&self, request: Request<Incoming>) -> Self::Future {
+        let stream = Stream::begin(&self.streams);
+        let response = self.service.call(request);
+        Box::pin(async move {
+            response.await.map(|response| {
+                response.map(|body| CountedBody {
+                    body,
+                    _stream: stream,
+                })
+            })
+        })
+    }
+}
+
+/// A response body that counts as an open stream until it is done or dropped.
+struct CountedBody {
+    body: ResponseBody,
+    _stream: Stream,
+}
+
+impl hyper::body::Body for CountedBody {
+    type Data = Bytes;
+    type Error = <ResponseBody as hyper::body::Body>::Error;
+
+    fn poll_frame(
+        self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Bytes>, Self::Error>>> {
+        std::pin::Pin::new(&mut self.get_mut().body).poll_frame(context)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.body.is_end_stream()
+    }
+
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        self.body.size_hint()
     }
 }
 

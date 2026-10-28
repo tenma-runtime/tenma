@@ -3446,6 +3446,14 @@ PHP_FUNCTION(tenma_parse_multipart) {
     add_next_index_zval(return_value, files);
 }
 
+/** Drops the session ID once the session is closed, so that the next request reads its own cookie. */
+static void forget_session(void) {
+    if (PS(session_status) != php_session_active && PS(id)) {
+        zend_string_release(PS(id));
+        PS(id) = NULL;
+    }
+}
+
 /**
  * tenma_forget_session(): void. The session extension keeps the ID until the PHP request ends,
  * and in Tenma that lasts as long as the worker. Without an ID, session_start() looks in the cookie
@@ -3453,10 +3461,7 @@ PHP_FUNCTION(tenma_parse_multipart) {
  */
 PHP_FUNCTION(tenma_forget_session) {
     ZEND_PARSE_PARAMETERS_NONE();
-    if (PS(session_status) != php_session_active && PS(id)) {
-        zend_string_release(PS(id));
-        PS(id) = NULL;
-    }
+    forget_session();
 }
 
 /** tenma_stream_start(int $rid, int $status, list<string> $headers): bool. Sends the head; the body follows. */
@@ -4034,6 +4039,9 @@ static int finish_classic(uint64_t rid, enum outcome handled) {
     ZVAL_BOOL(&argument, fatal);
     responded_rid = 0;
     enum outcome finished = call_stdlib("Http\\finishClassic", 1, &argument);
+    // Whatever happened while the session was saved (an exception from an error handler, exit()), the next
+    // visitor must not get this one's session ID
+    forget_session();
     int answered = responded_rid == rid;
     classic_open = 0;
     smart_str_free(&classic_output);

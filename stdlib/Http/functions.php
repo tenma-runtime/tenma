@@ -180,10 +180,13 @@ function startClassic(array $server, Request $request, int $rid): void
  */
 function endSession(): void
 {
-    if (session_status() === PHP_SESSION_ACTIVE) {
-        session_write_close();
+    try {
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+    } finally {
+        \tenma_forget_session();
     }
-    \tenma_forget_session();
 }
 
 /**

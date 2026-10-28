@@ -526,6 +526,12 @@ fn sessions_per_visitor_without_leaks() {
     let stranger = get(port, "/");
     assert!(stranger.ends_with("visit 1"), "{stranger}");
     assert!(!stranger.contains(cookie));
+
+    // A session whose write fails at the end of the request, with an error handler that throws on the
+    // warning and an exception handler: the ID still does not reach the next visitor
+    with_cookie("/break");
+    let next = get(port, "/");
+    assert!(next.ends_with("visit 1") && !next.contains(cookie), "{next}");
 }
 
 #[test]

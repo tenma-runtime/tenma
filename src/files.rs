@@ -14,6 +14,7 @@ use std::io::SeekFrom;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::UNIX_EPOCH;
 
 use bytes::{Bytes, BytesMut};
@@ -102,7 +103,39 @@ fn fd_path(file: &File) -> Option<PathBuf> {
 /// Extensions PHP may execute: their source is never handed out, so the front controller can sit in the directory.
 const SOURCE_EXTENSIONS: [&str; 7] = ["php", "phtml", "phar", "phps", "pht", "php5", "php7"];
 
-/// Opens $candidate and checks that the opened file really is under $root, is not hidden and is no PHP source.
+/// What tenma itself reads or writes: the script, its tenma.json, the php.ini of -c, the TLS certificate and
+/// key, the --record directory. A static root that holds them (`static: __DIR__`) never hands them out.
+static PROTECTED: OnceLock<Vec<PathBuf>> = OnceLock::new();
+
+/// Keeps $paths, files or directories, out of every static root. Once, before the servers start.
+pub fn protect(paths: Vec<PathBuf>) {
+    let resolved = paths
+        .into_iter()
+        .map(|path| {
+            std::fs::canonicalize(&path).unwrap_or_else(|_| {
+                // Not there yet (the --record directory is created later): resolve at least the parent
+                let parent = path
+                    .parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                    .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+                let name = path.file_name().map(PathBuf::from).unwrap_or_default();
+                std::fs::canonicalize(&parent).unwrap_or(parent).join(name)
+            })
+        })
+        .collect();
+    let _ = PROTECTED.set(resolved);
+}
+
+/// Whether $real, the opened file's path, is one of tenma's own files or lies in one of its directories.
+fn protected(real: &Path) -> bool {
+    real.file_name().is_some_and(|name| name == "tenma.json")
+        || PROTECTED
+            .get()
+            .is_some_and(|paths| paths.iter().any(|path| real.starts_with(path)))
+}
+
+/// Opens $candidate and checks that the opened file really is under $root, is not hidden, is no PHP source
+/// and is none of tenma's own files.
 fn open_inside(root: &Path, candidate: &Path) -> Option<(File, std::fs::Metadata, PathBuf)> {
     // O_NONBLOCK: a named pipe in the directory would otherwise make open() wait forever; files do not mind
     let file = std::fs::OpenOptions::new()
@@ -124,7 +157,7 @@ fn open_inside(root: &Path, candidate: &Path) -> Option<(File, std::fs::Metadata
                 .any(|php| ext.eq_ignore_ascii_case(php))
         });
     let meta = file.metadata().ok()?;
-    (!hidden && !source).then_some((file, meta, real))
+    (!hidden && !source && !protected(&real)).then_some((file, meta, real))
 }
 
 /// The file for the path under $root, if there is one that may be served. Blocks: runs on a

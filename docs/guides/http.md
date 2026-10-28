@@ -199,7 +199,9 @@ What Tenma never serves:
 
 - hidden files and directories (`.env`, `.git`),
 - PHP sources (`.php`, `.phtml`, `.phar`, `.phps`, `.pht`, `.php5`, `.php7`),
-- files that a symlink places outside the directory.
+- files that a symlink places outside the directory,
+- Tenma's own files, wherever the directory holds them: the script, its `tenma.json`, the `php.ini` of `-c`, the TLS
+  certificate and key, and the `--record` directory.
 
 So a front controller can sit next to the assets. The directory is resolved per request: switching a `current` symlink during a deploy takes effect at once. `open_basedir` applies.
 

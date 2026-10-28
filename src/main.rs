@@ -361,6 +361,8 @@ fn parse_args(given: &[String]) -> Result<(Vec<String>, Options), String> {
     let mut tls_ports = Vec::new();
     let mut record: Option<journal::Settings> = None;
     let mut plugins = Vec::new();
+    // Files a static root must never serve (src/files.rs)
+    let mut protected: Vec<std::path::PathBuf> = Vec::new();
     while let Some(arg) = args.next() {
         let mut value = |name: &str| args.next().ok_or(format!("{name} needs a value"));
         match arg.as_str() {
@@ -413,7 +415,11 @@ fn parse_args(given: &[String]) -> Result<(Vec<String>, Options), String> {
             // As with php: -d name=value or -dname=value, -c path
             "-d" => php::define_ini(&value("-d")?)?,
             define if define.starts_with("-d") => php::define_ini(&define[2..])?,
-            "-c" => php::set_ini_path(&value("-c")?)?,
+            "-c" => {
+                let path = value("-c")?;
+                protected.push(path.clone().into());
+                php::set_ini_path(&path)?;
+            }
             // As php -r: the code instead of a script, the rest are its arguments
             "-r" => {
                 let _ = CODE.set(value("-r")?);
@@ -442,6 +448,7 @@ fn parse_args(given: &[String]) -> Result<(Vec<String>, Options), String> {
             "--pubsub" => pubsub::use_redis(&value("--pubsub")?)?,
             "--record" => {
                 let directory = value("--record")?;
+                protected.push(directory.clone().into());
                 record.get_or_insert_with(Default::default).directory = directory.into();
             }
             "--record-on" => match value("--record-on")?.as_str() {
@@ -528,7 +535,11 @@ fn parse_args(given: &[String]) -> Result<(Vec<String>, Options), String> {
         options.workers = 1;
     }
     match (certificate, key) {
-        (Some(certificate), Some(key)) => tls::configure(certificate, key, tls_ports)?,
+        (Some(certificate), Some(key)) => {
+            protected.push(certificate.clone().into());
+            protected.push(key.clone().into());
+            tls::configure(certificate, key, tls_ports)?;
+        }
         (None, None) if tls_ports.is_empty() => {}
         (None, None) => return Err("--tls-port needs --tls-cert and --tls-key".into()),
         _ => return Err("--tls-cert and --tls-key go together".into()),
@@ -549,6 +560,11 @@ fn parse_args(given: &[String]) -> Result<(Vec<String>, Options), String> {
         }
         options.record = Some(Box::leak(Box::new(settings)));
     }
+    protected.push(argv[0].clone().into());
+    if let Some(config) = CONFIG.get() {
+        protected.push(config.clone());
+    }
+    files::protect(protected);
     Ok((argv, options))
 }
 

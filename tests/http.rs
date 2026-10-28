@@ -531,7 +531,10 @@ fn sessions_per_visitor_without_leaks() {
     // warning and an exception handler: the ID still does not reach the next visitor
     with_cookie("/break");
     let next = get(port, "/");
-    assert!(next.ends_with("visit 1") && !next.contains(cookie), "{next}");
+    assert!(
+        next.ends_with("visit 1") && !next.contains(cookie),
+        "{next}"
+    );
 }
 
 #[test]
@@ -1948,6 +1951,44 @@ fn multipart_edge_cases() {
         String::from_utf8_lossy(&output.stdout),
         "{\"f\":\"X\"}\n{\"real\":\"a;name=evil.txt\",\"path\":\"x41.txt\",\"doc\":{\"a\":\"d.txt\"},\"x\":[\"x2\"]}\n\
          Too many parts in the form frugal\nrejected\nrejected\nrejected\nrejected\n\"s=v; Path=\\/; HttpOnly; SameSite=Lax\"\n\"s=v; Path=\\/; Secure; HttpOnly; SameSite=None\"\n"
+    );
+}
+
+#[test]
+fn static_root_never_serves_tenmas_own_files() {
+    let port = 18_116;
+    let _server = Server(
+        Command::new(env!("CARGO_BIN_EXE_tenma"))
+            .arg("tests/fixtures/static_self/index.php")
+            .env("PORT", port.to_string())
+            .spawn()
+            .unwrap(),
+    );
+    get(port, "/start");
+    assert!(get(port, "/style.css").starts_with("HTTP/1.1 200"));
+
+    // The script, the tenma.json in use, its php.ini and the --record directory lie in the static root: PHP
+    // answers for them, as for any missing file
+    for path in [
+        "/tenma.json",
+        "/php.ini",
+        "/index.php",
+        "/journals",
+        "/journals/",
+    ] {
+        let response = get(port, path);
+        assert!(response.ends_with(&format!("php: {path}\n")), "{response}");
+    }
+    let journal = std::fs::read_dir("tests/fixtures/static_self/journals")
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .find(|name| name.ends_with(".trace"))
+        .expect("journal missing");
+    let response = get(port, &format!("/journals/{journal}"));
+    assert!(
+        response.ends_with(&format!("php: /journals/{journal}\n")),
+        "{response}"
     );
 }
 

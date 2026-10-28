@@ -1504,7 +1504,7 @@ dependencies = [
 
 [[package]]
 name = "tenma"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "bytes",
  "cc",

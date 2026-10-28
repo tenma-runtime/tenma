@@ -861,6 +861,30 @@ fn clients_that_hold_the_server_are_limited() {
 }
 
 #[test]
+fn migrations_apply_once_in_order_and_all_or_nothing() {
+    let user = std::env::var("USER").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_tenma"))
+        .arg("tests/fixtures/migrations.php")
+        .env(
+            "DATABASE_URL",
+            std::env::var("DATABASE_URL")
+                .unwrap_or(format!("postgres://{user}@localhost/postgres")),
+        )
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.starts_with("no postgres") {
+        skip("no Postgres reachable");
+        return;
+    }
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        stdout,
+        "001_items,002_one\nagain nothing\nbroken step failed\nrows 1\n"
+    );
+}
+
+#[test]
 fn postgres_and_redis_async() {
     let port = 18_090;
     let user = std::env::var("USER").unwrap();

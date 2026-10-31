@@ -3804,26 +3804,33 @@ fn publish_reaches_every_worker() {
 
 #[test]
 fn publish_through_redis_reaches_other_processes() {
+    publish_through_redis([18_133, 18_134], true);
+}
+
+#[test]
+fn channel_connect_from_the_script_reaches_other_processes() {
+    publish_through_redis([18_204, 18_205], false);
+}
+
+/// Two processes of two workers on one Redis, given by --pubsub or by Channel::connect() in the script.
+fn publish_through_redis(ports: [u16; 2], flag: bool) {
     let redis = std::env::var("REDIS_URL").unwrap_or("redis://127.0.0.1:6379".into());
     if TcpStream::connect(redis.trim_start_matches("redis://")).is_err() {
         skip("no Redis reachable");
         return;
     }
-    let ports = [18_133, 18_134];
     let _servers = ports.map(|port| {
-        Server(
-            Command::new(env!("CARGO_BIN_EXE_tenma"))
-                .args([
-                    "--workers",
-                    "2",
-                    "--pubsub",
-                    &redis,
-                    "tests/fixtures/pubsub.php",
-                ])
-                .env("PORT", port.to_string())
-                .spawn()
-                .unwrap(),
-        )
+        let mut command = Command::new(env!("CARGO_BIN_EXE_tenma"));
+        command
+            .args(["--workers", "2"])
+            .env("PORT", port.to_string())
+            .env("CHANNEL", format!("news-{}", ports[0]));
+        if flag {
+            command.args(["--pubsub", &redis]);
+        } else {
+            command.env("PUBSUB", &redis);
+        }
+        Server(command.arg("tests/fixtures/pubsub.php").spawn().unwrap())
     });
     for port in ports {
         assert!(get(port, "/").starts_with("HTTP/1.1 200"));
@@ -3848,6 +3855,13 @@ fn publish_through_redis_reaches_other_processes() {
         let heard = get(port, "/");
         assert!(heard.ends_with("\r\n\r\na,b\n"), "{heard}");
     }
+
+    // Another Redis later is refused, the URL stays the first one's
+    let refused = get(ports[0], "/connect-other");
+    assert!(
+        refused.ends_with("Messages go through another Redis already\n"),
+        "{refused}"
+    );
 }
 
 /// A connection over TLS that trusts only the test CA of tests/fixtures/tls (cert.pem and

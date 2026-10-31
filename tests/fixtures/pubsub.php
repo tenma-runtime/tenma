@@ -1,17 +1,23 @@
 <?php
 // For tests/http.rs: messages between workers. Every worker subscribes at startup and keeps what it hears
 $heard = [];
-(new \Messaging\Channel('news'))->subscribe(function (string $message) use (&$heard) {
+// Its own name per test, as the tests on one Redis run at once
+$channel = getenv('CHANNEL') ?: 'news';
+// Through Redis without --pubsub; every worker asks, the same URL again is fine
+if (getenv('PUBSUB')) {
+    \Messaging\Channel::connect(getenv('PUBSUB'));
+}
+(new \Messaging\Channel($channel))->subscribe(function (string $message) use (&$heard) {
     $heard[] = $message;
 });
-$muted = (new \Messaging\Channel('news'))->subscribe(function () use (&$heard) {
+$muted = (new \Messaging\Channel($channel))->subscribe(function () use (&$heard) {
     $heard[] = 'cancelled';
 });
 $muted->cancel();
 
-(new \Http\Server((int) getenv('PORT'), function (Http\Request $request) use (&$heard) {
+(new \Http\Server((int) getenv('PORT'), function (Http\Request $request) use (&$heard, $channel) {
     if ($request->path === '/publish') {
-        (new \Messaging\Channel('news'))->publish($request->query['message']);
+        (new \Messaging\Channel($channel))->publish($request->query['message']);
         return "published\n";
     }
     if ($request->path === '/kill-publisher') {
@@ -25,10 +31,18 @@ $muted->cancel();
         }
         return "killed\n";
     }
+    if ($request->path === '/connect-other') {
+        try {
+            \Messaging\Channel::connect('redis://127.0.0.1:1');
+        } catch (\LogicException $refused) {
+            return $refused->getMessage() . "\n";
+        }
+        return "connected\n";
+    }
     // Made in a request: ends with it, so later messages find no callback of it
     if ($request->path === '/wait') {
         $message = null;
-        (new \Messaging\Channel('news'))->subscribe(function (string $received) use (&$message) {
+        (new \Messaging\Channel($channel))->subscribe(function (string $received) use (&$message) {
             $message = $received;
         });
         while ($message === null) {

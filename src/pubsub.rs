@@ -2,8 +2,9 @@
 //! in every worker of this process, the publishing one included. A subscription is a channel per
 //! worker; PHP fetches the next message with an op and runs its callback in a fiber.
 //!
-//! With --pubsub redis://…, messages go through Redis instead: a thread of its own publishes them there
-//! and subscribes to every channel a worker listens on, so every process on that Redis hears them.
+//! With --pubsub redis://… or Channel::connect() from the script, messages go through Redis instead: a
+//! thread of its own publishes them there and subscribes to every channel a worker listens on, so every
+//! process on that Redis hears them.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -33,8 +34,8 @@ static CHANNELS: LazyLock<Mutex<HashMap<Vec<u8>, Vec<(u64, Sender<Vec<u8>>)>>>> 
 /// Unique across workers: unsubscribe finds the subscription in CHANNELS by it.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-/// --pubsub: what the Redis thread should do.
-static REDIS: OnceLock<UnboundedSender<Command>> = OnceLock::new();
+/// --pubsub or Channel::connect(): the Redis URL and what the Redis thread should do.
+static REDIS: OnceLock<(String, UnboundedSender<Command>)> = OnceLock::new();
 /// Publishes handed to the Redis thread that it has not taken yet. While Redis is down they wait for the
 /// reconnect, up to QUEUED of them; beyond that new ones are dropped.
 static WAITING: AtomicUsize = AtomicUsize::new(0);
@@ -59,14 +60,14 @@ fn channels() -> MutexGuard<'static, HashMap<Vec<u8>, Vec<(u64, Sender<Vec<u8>>)
 /// Sends a command to the Redis thread, if there is one. Called while CHANNELS is locked, so subscribe
 /// and unsubscribe of the same channel reach Redis in the order they happened.
 fn tell_redis(command: Command) {
-    if let Some(redis) = REDIS.get() {
+    if let Some((_, redis)) = REDIS.get() {
         let _ = redis.send(command);
     }
 }
 
 fn publish(channel: &[u8], message: &[u8]) {
     match REDIS.get() {
-        Some(redis) => {
+        Some((_, redis)) => {
             queue_publish(redis, channel, message);
         }
         None => deliver(channel, message),
@@ -192,7 +193,8 @@ pub fn clear() {
 
 /// tenma_pubsub(string $op, int $id, string $channel, string $message): int.
 /// "publish": 1. "subscribe": the subscription's ID. "receive": an op for the next message of
-/// subscription $id, 0 outside the event loop. "unsubscribe": 1.
+/// subscription $id, 0 outside the event loop. "unsubscribe": 1. "connect" with the URL in $channel:
+/// 1, 0 for a URL Redis does not take, 2 when messages go through another Redis already.
 #[unsafe(no_mangle)]
 extern "C" fn tenma_rs_pubsub(
     op: *const u8,
@@ -215,15 +217,50 @@ extern "C" fn tenma_rs_pubsub(
             unsubscribe(id);
             1
         }
+        b"connect" => match std::str::from_utf8(channel).map(connect) {
+            Ok(Ok(())) => 1,
+            Ok(Err(Refused::Other)) => 2,
+            _ => 0,
+        },
         _ => 0,
     }
 }
 
 /// --pubsub redis://…: starts the thread that carries messages through Redis. Only before the workers.
 pub fn use_redis(url: &str) -> Result<(), String> {
-    let client = redis::Client::open(url).map_err(|error| format!("--pubsub {url}: {error}"))?;
+    match connect(url) {
+        Ok(()) => Ok(()),
+        Err(Refused::Url(error)) => Err(format!("--pubsub {url}: {error}")),
+        Err(Refused::Other) => Err("--pubsub given twice".into()),
+        Err(Refused::Thread(error)) => Err(format!("--pubsub: {error}")),
+    }
+}
+
+enum Refused {
+    Url(redis::RedisError),
+    /// Messages go through another Redis already
+    Other,
+    Thread(std::io::Error),
+}
+
+/// Starts the thread that carries messages through Redis, once per process; the same URL again, as
+/// every worker's script asks for it, is fine. Channels subscribed before go to Redis on its first
+/// connection.
+fn connect(url: &str) -> Result<(), Refused> {
+    // Two workers asking at once start one thread
+    static STARTING: Mutex<()> = Mutex::new(());
+    let _starting = STARTING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((current, _)) = REDIS.get() {
+        return if current == url {
+            Ok(())
+        } else {
+            Err(Refused::Other)
+        };
+    }
+    let client = redis::Client::open(url).map_err(Refused::Url)?;
     let (sender, commands) = unbounded_channel();
-    REDIS.set(sender).map_err(|_| "--pubsub given twice")?;
     std::thread::Builder::new()
         .name("tenma-pubsub".into())
         .spawn(move || {
@@ -233,7 +270,8 @@ pub fn use_redis(url: &str) -> Result<(), String> {
                 .expect("tokio does not start");
             runtime.block_on(bridge(client, commands));
         })
-        .map_err(|error| format!("--pubsub: {error}"))?;
+        .map_err(Refused::Thread)?;
+    let _ = REDIS.set((url.to_owned(), sender));
     Ok(())
 }
 

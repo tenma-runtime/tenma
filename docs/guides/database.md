@@ -302,6 +302,19 @@ tenma --pubsub redis://cache.internal:6379 app.php
 
 Messages then go through Redis `PUBLISH` and `SUBSCRIBE`, on channels of the same name. Every worker of every process hears them. The PHP code stays the same.
 
+A script that starts its own Redis (with tenma/redis) knows the URL only once it runs. It calls `Channel::connect()` at startup instead of `--pubsub`:
+
+```php
+<?php
+
+use Messaging\Channel;
+use Tenma\Redis\Server;
+
+Channel::connect(Server::start(__DIR__ . '/data/redis')->url());
+```
+
+It holds for the whole process, also for subscriptions made before it. Every worker runs the script and calls it again with the same URL, which does nothing; another URL throws a `LogicException`.
+
 ## PDO, mysqli and sqlite3
 
 PDO (MySQL, Postgres, SQLite), mysqli and sqlite3 are built in and work as usual. They block: while a PDO query runs, no other request of that worker runs. They fit scripts, [classic mode](classic-mode.md) and SQLite with short queries. For request handlers under load, use `Data\Postgres`. An asynchronous MySQL client is not available yet.

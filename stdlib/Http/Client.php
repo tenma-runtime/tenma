@@ -23,6 +23,24 @@ final class Client
         return $this->send('POST', $url, $headers, $body);
     }
 
+    /**
+     * Sends a GET and streams the response body into the file at $path, which it creates or replaces;
+     * the directory must exist. The body is never held in memory whole, so the file may be far larger
+     * than memory_limit. The returned response has status and headers and an empty body. Every status
+     * is written, check it. On a network error or a timeout the file is removed and the call throws.
+     *
+     * @param array<string, string> $headers
+     */
+    public function download(string $url, string $path, array $headers = []): ClientResponse
+    {
+        \Tenma\Internal\requireFiber();
+        $lines = headerLines($headers);
+        $timeout = (int) ceil($this->timeout * 1000);
+        $op = \tenma_op_fetch('GET', $url, $lines, '', $timeout, $path);
+        [$status, $responseHeaders] = \Tenma\Internal\await($op);
+        return new ClientResponse($status, $responseHeaders, '');
+    }
+
     /** @param array<string, string> $headers */
     public function send(string $method, string $url, array $headers = [], string $body = ''): ClientResponse
     {

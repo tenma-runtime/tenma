@@ -106,7 +106,8 @@ extern uint64_t tenma_rs_dev(const char *op, size_t op_len, const char *arg, siz
 extern uint64_t tenma_rs_db(const char *op, size_t op_len, const char *target, size_t target_len,
     const char *sql, size_t sql_len, const char *params, size_t params_len);
 extern uint64_t tenma_rs_fetch(const char *method, size_t method_len, const char *url, size_t url_len,
-    const char *headers, size_t headers_len, const char *body, size_t body_len, uint64_t timeout_ms);
+    const char *headers, size_t headers_len, const char *body, size_t body_len, uint64_t timeout_ms,
+    const char *path, size_t path_len);
 
 // Each worker thread has its own PHP interpreter, and so its own handlers
 #define MAX_HANDLERS 64
@@ -250,6 +251,7 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_tenma_op_fetch, 0, 5, IS_LONG, 0
     ZEND_ARG_TYPE_INFO(0, headers, IS_ARRAY, 0)
     ZEND_ARG_TYPE_INFO(0, body, IS_STRING, 0)
     ZEND_ARG_TYPE_INFO(0, timeout_ms, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, path, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_tenma_set_input, 0, 1, IS_VOID, 0)
@@ -3357,23 +3359,31 @@ PHP_FUNCTION(tenma_op_sleep) {
     RETURN_LONG((zend_long) tenma_rs_sleep(milliseconds < 0 ? 0 : milliseconds));
 }
 
-/** tenma_op_fetch(string $method, string $url, list<string> $headers, string $body, int $timeoutMs): int. Starts an HTTP request. */
+/**
+ * tenma_op_fetch(string $method, string $url, list<string> $headers, string $body, int $timeoutMs, string $path = ''): int.
+ * Starts an HTTP request. A non-empty $path streams the response body into that file.
+ */
 PHP_FUNCTION(tenma_op_fetch) {
     zend_string *method, *url, *body;
     zval *headers;
     zend_long timeout_ms;
-    ZEND_PARSE_PARAMETERS_START(5, 5)
+    char *path = "";
+    size_t path_len = 0;
+    ZEND_PARSE_PARAMETERS_START(5, 6)
         Z_PARAM_STR(method)
         Z_PARAM_STR(url)
         Z_PARAM_ARRAY(headers)
         Z_PARAM_STR(body)
         Z_PARAM_LONG(timeout_ms)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_PATH(path, path_len)
     ZEND_PARSE_PARAMETERS_END();
 
     size_t packed_len;
     char *packed = pack_lines(Z_ARRVAL_P(headers), &packed_len);
     uint64_t op = tenma_rs_fetch(ZSTR_VAL(method), ZSTR_LEN(method), ZSTR_VAL(url), ZSTR_LEN(url),
-        packed, packed_len, ZSTR_VAL(body), ZSTR_LEN(body), timeout_ms > 0 ? (uint64_t) timeout_ms : 1);
+        packed, packed_len, ZSTR_VAL(body), ZSTR_LEN(body), timeout_ms > 0 ? (uint64_t) timeout_ms : 1,
+        path, path_len);
     free(packed);
     RETURN_LONG((zend_long) op);
 }

@@ -4113,6 +4113,74 @@ fn fetch_stops_at_memory_limit() {
 }
 
 #[test]
+fn download_streams_into_a_file() {
+    let port = 18_206;
+    let source = 18_207;
+    // /big: 200 MB under memory_limit=64M. /stall: 1 MB, then nothing until the timeout
+    let listener = std::net::TcpListener::bind(("127.0.0.1", source)).unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            std::thread::spawn(move || {
+                let mut head = [0; 1024];
+                let read = stream.read(&mut head).unwrap();
+                let stall = String::from_utf8_lossy(&head[..read]).starts_with("GET /stall");
+                let head =
+                    "HTTP/1.1 200 OK\r\nContent-Length: 209715200\r\nConnection: close\r\n\r\n";
+                let _ = stream.write_all(head.as_bytes());
+                let chunk = vec![b'x'; 1 << 20];
+                let chunks = if stall { 1 } else { 200 };
+                for _ in 0..chunks {
+                    if stream.write_all(&chunk).is_err() {
+                        break;
+                    }
+                }
+                if stall {
+                    std::thread::sleep(Duration::from_secs(5));
+                }
+            });
+        }
+    });
+    let directory = scratch("download");
+    let app = directory.join("app.php");
+    std::fs::write(
+        &app,
+        format!(
+            r#"<?php
+(new \Http\Server({port}, function ($request) {{
+    $file = '{dir}/out' . str_replace('/', '-', $request->path);
+    try {{
+        $response = (new \Http\Client(1.0))->download('http://127.0.0.1:{source}' . $request->path, $file);
+        clearstatcache();
+        return $response->status . ' ' . strlen($response->body) . ' ' . filesize($file) . "\n";
+    }} catch (RuntimeException $error) {{
+        return $error->getMessage() . ' ' . (file_exists($file) ? 'kept' : 'removed') . "\n";
+    }}
+}}))->start();
+"#,
+            dir = directory.display()
+        ),
+    )
+    .unwrap();
+    let _server = Server(
+        Command::new(env!("CARGO_BIN_EXE_tenma"))
+            .args(["-d", "memory_limit=64M"])
+            .arg(&app)
+            .spawn()
+            .unwrap(),
+    );
+
+    let big = get(port, "/big");
+    assert!(big.ends_with("200 0 209715200\n"), "{big}");
+    let stall = get(port, "/stall");
+    assert!(
+        stall.ends_with("/stall: timed out after 1 s removed\n"),
+        "{stall}"
+    );
+    let _ = std::fs::remove_dir_all(directory);
+}
+
+#[test]
 fn fetch_errors_name_their_cause() {
     let port = 18_174;
     let directory = scratch("fetch-errors");

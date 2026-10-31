@@ -5,6 +5,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_int;
+use std::os::unix::ffi::OsStrExt;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -209,11 +210,15 @@ extern "C" fn tenma_rs_fetch(
     body: *const u8,
     body_len: usize,
     timeout_ms: u64,
+    path: *const u8,
+    path_len: usize,
 ) -> u64 {
     let method = text(method, method_len);
     let url = text(url, url_len);
     let headers = text(headers, headers_len);
     let body = php::bytes(body, body_len).to_vec();
+    // Empty: the body comes back as a string; otherwise it goes into this file
+    let path = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(php::bytes(path, path_len)));
     let detail = format!("{method} {url}");
     let request = {
         let client = client();
@@ -241,6 +246,11 @@ extern "C" fn tenma_rs_fetch(
             Ok(response) => response,
             Err(error) => return OpResult::Error(fetch_error(&error, timeout_ms)),
         };
+        if !path.as_os_str().is_empty() {
+            return download(response, path, timeout_ms)
+                .await
+                .unwrap_or_else(|error| error);
+        }
         let status = response.status().as_u16();
         let headers = response
             .headers()
@@ -268,6 +278,59 @@ extern "C" fn tenma_rs_fetch(
             headers,
             body,
         }
+    })
+}
+
+/// Removes a download's file unless it is complete: on an error, a timeout or a cancelled request.
+struct Partial(Option<std::path::PathBuf>);
+
+impl Drop for Partial {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+/// Streams the body into the file chunk by chunk, so memory holds one chunk at a time. Any status
+/// is written; the caller checks it.
+async fn download(
+    mut response: reqwest::Response,
+    path: std::path::PathBuf,
+    timeout_ms: u64,
+) -> Result<OpResult, OpResult> {
+    use tokio::io::AsyncWriteExt;
+
+    let status = response.status().as_u16();
+    let headers = response
+        .headers()
+        .iter()
+        .map(|(name, value)| format!("{}: {}", name, String::from_utf8_lossy(value.as_bytes())))
+        .collect();
+    let url = response.url().clone();
+    let label = path.display().to_string();
+    let io_error = |error: std::io::Error| OpResult::Error(format!("{label}: {error}"));
+
+    let mut file = tokio::fs::File::create(&path).await.map_err(io_error)?;
+    let mut partial = Partial(Some(path));
+    loop {
+        let chunk = response
+            .chunk()
+            .await
+            .map_err(|error| error.with_url(url.clone()))
+            .map_err(|error| OpResult::Error(fetch_error(&error, timeout_ms)))?;
+        let Some(chunk) = chunk else {
+            break;
+        };
+        file.write_all(&chunk).await.map_err(io_error)?;
+    }
+    file.flush().await.map_err(io_error)?;
+    partial.0 = None;
+
+    Ok(OpResult::Http {
+        status,
+        headers,
+        body: Vec::new(),
     })
 }
 

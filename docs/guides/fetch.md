@@ -12,6 +12,7 @@ order: 210
 | [`get($url, $headers)`](../reference/Http/Client.md#get)                   | sends a GET and waits for the complete response        |
 | [`post($url, $body, $headers)`](../reference/Http/Client.md#post)          | sends a POST with a raw body                           |
 | [`send($method, $url, $headers, $body)`](../reference/Http/Client.md#send) | any method                                             |
+| [`download($url, $path, $headers)`](../reference/Http/Client.md#download)  | sends a GET and streams the body into a file           |
 | [`ClientResponse`](../reference/Http/ClientResponse.md)                    | `status`, `headers`, `body`, `header($name)`, `json()` |
 
 ## Sending a request
@@ -98,6 +99,35 @@ new Server(8080, function () {
 })->start();
 ```
 
+## Downloading to a file
+
+`download()` writes the body into a file chunk by chunk, so a file far larger than `memory_limit` never sits in memory. The response it returns has `status` and `headers`, its `body` is empty.
+
+```php
+<?php
+
+use Http\Client;
+use Threading\Task;
+
+Task::run(function () {
+    $path = sys_get_temp_dir() . '/dump.jsonl';
+    $response = new Client(timeout: 600)->download('https://example.com/dump.jsonl', $path);
+
+    if ($response->status !== 200) {
+        throw new RuntimeException("download failed: {$response->status}");
+    }
+
+    foreach (new SplFileObject($path) as $line) {
+        // one line at a time
+    }
+});
+```
+
+- The file is created or replaced; its directory must exist.
+- Every status is written to the file, an error page too. Check `status`.
+- On a network error, a timeout or a cancelled request the file is removed, and the call throws a `RuntimeException`.
+- `timeout` covers the whole download.
+
 ## Several requests at once
 
 Independent requests belong in [`Task::all()`](async.md#several-things-at-once). The total time is that of the slowest, not the sum.
@@ -126,7 +156,7 @@ To avoid a request per page view, keep the last answer in memory and refresh it 
 
 ## Behaviour
 
-- `get()`, `post()` and `send()` wait until the whole response body is there. Only the calling fiber waits.
+- `get()`, `post()` and `send()` wait until the whole response body is there. Only the calling fiber waits. The body must fit under `memory_limit`; for larger ones use `download()`.
 - HTTP statuses never throw. Check `status`.
 - A `RuntimeException` is thrown for DNS errors, refused connections and TLS errors.
 - It is also thrown when the connection is not established within 10 seconds, or the response is not complete within `timeout`.

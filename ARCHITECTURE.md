@@ -24,6 +24,7 @@ Rust:
 | `src/ops.rs`     | ops PHP waits for: `sleep`, `fetch`                                                                                         |
 | `src/db.rs`      | Postgres (a pool per worker) and Redis (one connection per URL)                                                             |
 | `src/fs.rs`      | file operations for `FileSystem\FileInfo` and `DirectoryInfo`, on background threads                                        |
+| `src/password.rs`| Argon2id hashes for `Security\Password`, on background threads, at most one per CPU                                         |
 | `src/pubsub.rs`  | `Messaging\Channel::publish()` and `subscribe()`, through Redis with `--pubsub`                                             |
 | `src/net.rs`     | waits for PHP's own sockets (fsockopen, mysqlnd, the http wrapper) and `stream_select()` without blocking                   |
 | `src/pdo.rs`     | the PDO driver for Postgres on tokio-postgres, on a helper thread; the C layer implements PDO's driver interface            |

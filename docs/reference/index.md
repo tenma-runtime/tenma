@@ -14,5 +14,6 @@ generated: true
 - [`Lsp`](Lsp/index.md)
 - [`Messaging`](Messaging/index.md)
 - [`Process`](Process/index.md)
+- [`Security`](Security/index.md)
 - [`Tenma`](Tenma/index.md)
 - [`Threading`](Threading/index.md)

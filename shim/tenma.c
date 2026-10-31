@@ -90,6 +90,9 @@ extern uint64_t tenma_rs_pubsub(const char *op, size_t op_len, uint64_t id, cons
 /** File system, see src/fs.rs. */
 extern uint64_t tenma_rs_fs(const char *op, size_t op_len, const char *path, size_t path_len,
     const char *second, size_t second_len, bool flag, const char *data, size_t data_len);
+/** Password hashes, see src/password.rs. */
+extern uint64_t tenma_rs_password(const char *op, size_t op_len, const char *password, size_t password_len,
+    const char *hash, size_t hash_len);
 /** exit() outside a request: tenma exits with this status. */
 extern void tenma_rs_exit(int status);
 /** tenma --watch: a file PHP loaded, see tenma_report_included. */
@@ -342,6 +345,14 @@ ZEND_END_ARG_INFO()
 
 PHP_FUNCTION(tenma_op_fs);
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_tenma_op_password, 0, 3, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, op, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, password, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, hash, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+PHP_FUNCTION(tenma_op_password);
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_tenma_op_dev, 0, 2, IS_LONG, 0)
     ZEND_ARG_TYPE_INFO(0, op, IS_STRING, 0)
     ZEND_ARG_TYPE_INFO(0, arg, IS_STRING, 0)
@@ -434,6 +445,7 @@ static const zend_function_entry tenma_functions[] = {
     ZEND_FE(tenma_op_cancel, arginfo_tenma_op_cancel)
     ZEND_FE(tenma_exit_process, arginfo_tenma_shutdown)
     ZEND_FE(tenma_op_fs, arginfo_tenma_op_fs)
+    ZEND_FE(tenma_op_password, arginfo_tenma_op_password)
     ZEND_FE(tenma_op_dev, arginfo_tenma_op_dev)
     ZEND_FE(tenma_pubsub, arginfo_tenma_pubsub)
     ZEND_FE(tenma_durable_context, arginfo_tenma_durable_context)
@@ -3782,6 +3794,18 @@ PHP_FUNCTION(tenma_op_fs) {
         efree(destination);
     }
     RETURN_LONG((zend_long) id);
+}
+
+/** tenma_op_password(string $op, string $password, string $hash): int. Hashes off the event loop (src/password.rs). */
+PHP_FUNCTION(tenma_op_password) {
+    zend_string *op, *password, *hash;
+    ZEND_PARSE_PARAMETERS_START(3, 3)
+        Z_PARAM_STR(op)
+        Z_PARAM_STR(password)
+        Z_PARAM_STR(hash)
+    ZEND_PARSE_PARAMETERS_END();
+    RETURN_LONG((zend_long) tenma_rs_password(ZSTR_VAL(op), ZSTR_LEN(op), ZSTR_VAL(password), ZSTR_LEN(password),
+        ZSTR_VAL(hash), ZSTR_LEN(hash)));
 }
 
 /** tenma_pubsub(string $op, int $id, string $channel, string $message): int. Messages between workers (src/pubsub.rs). */

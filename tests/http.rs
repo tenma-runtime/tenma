@@ -1660,6 +1660,19 @@ fn file_system_async() {
 }
 
 #[test]
+fn password_hashes_off_the_worker() {
+    let output = Command::new(env!("CARGO_BIN_EXE_tenma"))
+        .arg("tests/fixtures/scripts/password.php")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "true\n[true,true,true,false,true,true,false,false,true]\nloop ran\n"
+    );
+}
+
+#[test]
 fn exit_status_is_not_stale() {
     let port = 18_113;
     let mut server = Command::new(env!("CARGO_BIN_EXE_tenma"))

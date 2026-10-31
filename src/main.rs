@@ -17,6 +17,7 @@ mod inspect;
 mod journal;
 mod net;
 mod ops;
+mod password;
 mod pdo;
 mod php;
 mod plugins;

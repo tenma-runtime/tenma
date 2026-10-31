@@ -3,7 +3,7 @@
 // The standard library of Tenma, embedded in the binary and loaded before the script.
 // It builds on the raw functions of the C layer (tenma_listen, tenma_respond, tenma_op_*)
 // and gives them a PHP API in the namespaces Http, Threading, FileSystem, Messaging, Data,
-// Development and Lsp; Tenma\Internal is the machinery behind them.
+// Development, Lsp, Process and Security; Tenma\Internal is the machinery behind them.
 //
 // Asynchronous without an await keyword: every request runs in its own Fiber.
 // When the code starts an op (sleep, fetch), the Fiber pauses, the event loop serves other
@@ -13,7 +13,7 @@
 namespace Tenma\Internal;
 
 /** The namespaces of the public API: what `tenma --stubs` and `tenma docs` cover. */
-const NAMESPACES = ['Http', 'Threading', 'FileSystem', 'Messaging', 'Data', 'Development', 'Lsp', 'Process'];
+const NAMESPACES = ['Http', 'Threading', 'FileSystem', 'Messaging', 'Data', 'Development', 'Lsp', 'Process', 'Security'];
 
 /** Whether $name is a class of the public API: the namespaces above, and Tenma\Plugin. */
 function isPublic(string $name): bool

@@ -40,6 +40,7 @@ cancelled where it waits, also inside `fgets()` or a PDO query: `Threading\Cance
 | files on disk: `fopen()`, `file_get_contents()`, `include` | the disk has no readiness to wait for     | `FileSystem\FileInfo` for large files; small reads are quick |
 | `sleep()`, `usleep()`                                      | the process sleeps                        | `Threading\Task::delay()`                                    |
 | PDO with SQLite                                            | a library call, no socket                 | fine for small databases                                     |
+| `password_hash()`, `password_verify()`                     | Argon2 computes 100 ms or more            | `Security\Password`, on a background thread                  |
 | `--pdo-pgsql native`, ext/pgsql (`pg_*()`)                 | libpq brings its own socket               | PDO without the option, `Data\Postgres`                      |
 | name resolution                                            | `getaddrinfo()` runs on the worker thread | an IP address, or a resolver that answers fast               |
 

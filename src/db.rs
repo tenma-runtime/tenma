@@ -449,14 +449,39 @@ fn words(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Whether the statement starts with WITH and mentions INSERT, UPDATE, DELETE or MERGE. One that only
-/// mentions them (in a string, a comment) takes the CREATE TABLE AS path as well, with the same result.
+/// Whether the statement starts with WITH and one of its parenthesized queries mentions INSERT, UPDATE,
+/// DELETE or MERGE. Only those must stay at the top level; a WITH of plain queries in front of an
+/// INSERT (WITH picked AS (SELECT ...) INSERT ... RETURNING) goes inside another WITH as it is. One
+/// that only mentions them (in a comment) takes the CREATE TABLE AS path as well, with the same result.
 pub fn modifying_with(sql: &str) -> bool {
-    let words = words(skip_comments(sql));
-    words.first().is_some_and(|word| word == "with")
-        && words
-            .iter()
-            .any(|word| matches!(word.as_str(), "insert" | "update" | "delete" | "merge"))
+    let sql = skip_comments(sql);
+    if words(sql).first().is_none_or(|word| word != "with") {
+        return false;
+    }
+    // The text inside parentheses, outside strings
+    let mut nested = String::new();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    for c in sql.chars() {
+        if in_string {
+            in_string = c != '\'';
+            continue;
+        }
+        match c {
+            '\'' => in_string = true,
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ if depth > 0 => {
+                nested.push(c);
+                continue;
+            }
+            _ => {}
+        }
+        nested.push(' ');
+    }
+    words(&nested)
+        .iter()
+        .any(|word| matches!(word.as_str(), "insert" | "update" | "delete" | "merge"))
 }
 
 /// PHP decodes a JSON number with a fraction or exponent as float. A `numeric` value a float cannot

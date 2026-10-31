@@ -940,7 +940,9 @@ fn postgres_and_redis_async() {
     assert!(get(port, "/script").contains(r#""n": 3"#));
     let modifying = get(port, "/modifying-with");
     assert!(
-        modifying.contains(r#""amount": 44"#) && modifying.contains(r#""n": 0"#),
+        modifying.contains(r#""amount": 44"#)
+            && modifying.contains(r#""n": 0"#)
+            && modifying.contains(r#""kept": 44"#),
         "{modifying}"
     );
     let failed = get(port, "/script-fails");

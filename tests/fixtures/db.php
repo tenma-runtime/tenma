@@ -151,6 +151,8 @@ $table = 'tenma_test_' . getmypid();
         '/modifying-with' => [
             $db->query("WITH moved AS (UPDATE $table SET amount = amount + \$1 RETURNING id, amount) SELECT amount FROM moved ORDER BY id DESC", [1]),
             $db->transaction(fn (Postgres $tx) => $tx->first("/* first */ WITH gone AS (DELETE FROM $table WHERE false RETURNING id) SELECT count(*)::int AS n FROM gone")),
+            // A WITH of plain queries in front of the change itself
+            $db->first("WITH picked AS (SELECT max(id) AS id FROM $table) UPDATE $table SET amount = amount WHERE id = (SELECT id FROM picked) RETURNING amount AS kept"),
         ],
         '/show' => [
             $db->first('SHOW client_encoding'),

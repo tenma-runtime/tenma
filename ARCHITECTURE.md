@@ -16,28 +16,28 @@ commands, the [documentation](docs/index.md) the features.
 
 Rust:
 
-| File             | Does                                                                                                                        |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `src/main.rs`    | command line, worker threads, accepting connections, the HTTP server                                                        |
-| `src/php.rs`     | safe wrappers around the C layer; pending requests, resuming fibers                                                         |
-| `src/stdlib.rs`  | loads the embedded PHP files of `stdlib/`                                                                                   |
-| `src/ops.rs`     | ops PHP waits for: `sleep`, `fetch`                                                                                         |
-| `src/db.rs`      | Postgres (a pool per worker) and Redis (one connection per URL)                                                             |
-| `src/fs.rs`      | file operations for `FileSystem\FileInfo` and `DirectoryInfo`, on background threads                                        |
-| `src/password.rs`| Argon2id hashes for `Security\Password`, on background threads, at most one per CPU                                         |
-| `src/pubsub.rs`  | `Messaging\Channel::publish()` and `subscribe()`, through Redis with `--pubsub`                                             |
-| `src/net.rs`     | waits for PHP's own sockets (fsockopen, mysqlnd, the http wrapper) and `stream_select()` without blocking                   |
-| `src/pdo.rs`     | the PDO driver for Postgres on tokio-postgres, on a helper thread; the C layer implements PDO's driver interface            |
-| `src/files.rs`   | static files: prefixes, ETag and 304, ranges                                                                                |
-| `src/tls.rs`     | `--tls-cert`, `--tls-key` and `--tls-port`: the TLS handshake and ALPN (HTTP/2 or HTTP/1.1), SIGHUP reloads the certificate |
-| `src/streams.rs` | streamed responses and WebSockets                                                                                           |
-| `src/watch.rs`   | `--watch`: which loaded files really changed (content, not timestamps)                                                      |
-| `src/dev.rs`     | the hooks of `tenma.json`                                                                                                   |
-| `src/inspect.rs` | `--inspect`: the debugger, stops a worker inside PHP's statement handler                                                    |
-| `src/journal.rs` | `--record`: the event journal of a worker life, its format, and the values of the wrapped PHP functions                     |
-| `src/replay.rs`  | `tenma replay`: plays a journal into a fresh interpreter, answers every op from it, checks responses                        |
-| `src/durable.rs` | `--durable`: the journal of a durable function in Postgres, its lease, its timers and signals, the poller                   |
-| `src/plugins.rs` | `--plugin`: loads native plugins with dlopen and implements the API of `tenma-plugin/tenma_plugin.h`                        |
+| File              | Does                                                                                                                        |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `src/main.rs`     | command line, worker threads, accepting connections, the HTTP server                                                        |
+| `src/php.rs`      | safe wrappers around the C layer; pending requests, resuming fibers                                                         |
+| `src/stdlib.rs`   | loads the embedded PHP files of `stdlib/`                                                                                   |
+| `src/ops.rs`      | ops PHP waits for: `sleep`, `fetch`                                                                                         |
+| `src/db.rs`       | Postgres (a pool per worker) and Redis (one connection per URL)                                                             |
+| `src/fs.rs`       | file operations for `FileSystem\FileInfo` and `DirectoryInfo`, on background threads                                        |
+| `src/password.rs` | Argon2id hashes for `Security\Password`, on background threads, at most one per CPU                                         |
+| `src/pubsub.rs`   | `Messaging\Channel::publish()` and `subscribe()`, through Redis with `--pubsub`                                             |
+| `src/net.rs`      | waits for PHP's own sockets (fsockopen, mysqlnd, the http wrapper) and `stream_select()` without blocking                   |
+| `src/pdo.rs`      | the PDO driver for Postgres on tokio-postgres, on a helper thread; the C layer implements PDO's driver interface            |
+| `src/files.rs`    | static files: prefixes, ETag and 304, ranges                                                                                |
+| `src/tls.rs`      | `--tls-cert`, `--tls-key` and `--tls-port`: the TLS handshake and ALPN (HTTP/2 or HTTP/1.1), SIGHUP reloads the certificate |
+| `src/streams.rs`  | streamed responses and WebSockets                                                                                           |
+| `src/watch.rs`    | `--watch`: which loaded files really changed (content, not timestamps)                                                      |
+| `src/dev.rs`      | the hooks of `tenma.json`                                                                                                   |
+| `src/inspect.rs`  | `--inspect`: the debugger, stops a worker inside PHP's statement handler                                                    |
+| `src/journal.rs`  | `--record`: the event journal of a worker life, its format, and the values of the wrapped PHP functions                     |
+| `src/replay.rs`   | `tenma replay`: plays a journal into a fresh interpreter, answers every op from it, checks responses                        |
+| `src/durable.rs`  | `--durable`: the journal of a durable function in Postgres, its lease, its timers and signals, the poller                   |
+| `src/plugins.rs`  | `--plugin`: loads native plugins with dlopen and implements the API of `tenma-plugin/tenma_plugin.h`                        |
 
 PHP, in `stdlib/`: one file per class, folders by namespace, the functions of a namespace in its
 `functions.php`. `build.rs` embeds every file; `src/stdlib.rs` loads them.

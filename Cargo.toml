@@ -1,6 +1,6 @@
 [package]
 name = "tenma"
-version = "0.2.19"
+version = "0.2.20"
 edition = "2024"
 description = "PHP as a long-running process: the script runs once, then one event loop serves every request"
 license = "MIT OR Apache-2.0"

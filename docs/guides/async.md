@@ -98,7 +98,7 @@ Task::run(function () {
 - Named arguments give named results. A list (`Task::all(...$functions)`) gives a list.
 - `all()` accepts tasks as well as functions.
 - It takes as long as the slowest function, not the sum.
-- If one function throws, `all()` cancels the others and waits until their `catch` and `finally` blocks have run. Then it throws the first error. Nothing is left running in the background.
+- If one function throws, `all()` cancels the others and waits until their `catch` and `finally` blocks have run. Then it throws the first error. Nothing is left running in the background. A `Task` you pass in is not cancelled: `all()` only stops waiting for it, as `await()` does.
 
 ## Cancellation
 

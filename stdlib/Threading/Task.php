@@ -54,7 +54,8 @@ final class Task
      * Runs everything concurrently and returns the results with the same keys:
      * Task::all(user: fn () => …, stats: fn () => …). If one fails, all() cancels
      * the others, waits until they have cleaned up, and then throws the first error: nothing is left
-     * behind in the background that still uses connections, transactions or the stream.
+     * behind in the background that still uses connections, transactions or the stream. A Task passed
+     * in is not cancelled: all() only stops waiting for it, as await() does.
      *
      * @param callable(): mixed|self ...$tasks
      * @return array<array-key, mixed>
@@ -62,13 +63,28 @@ final class Task
     public static function all(callable|self ...$tasks): array
     {
         $fiber = \Tenma\Internal\requireFiber();
-        $started = array_map(fn ($task) => $task instanceof self ? $task : self::start($task), $tasks);
+        foreach ($tasks as $task) {
+            if ($task instanceof self && $task->fiber === $fiber && !$task->done) {
+                throw new \LogicException('A task cannot wait for itself');
+            }
+        }
+        // Only the tasks started here are cancelled; passed-in ones (detach()!) are only waited for
+        $owned = [];
+        $started = [];
+        foreach ($tasks as $key => $task) {
+            if ($task instanceof self) {
+                $started[$key] = $task;
+                continue;
+            }
+            $started[$key] = $owned[] = self::start($task);
+        }
         $pending = count($started);
         $failed = null;
         $token = \Tenma\Internal\token('all');
         $woken = false;
-        foreach ($started as $task) {
-            $task->onSettled(function (self $task) use (&$pending, &$failed, &$woken, $fiber, $token): void {
+        $listeners = [];
+        foreach ($started as $key => $task) {
+            $listeners[$key] = $task->onSettled(function (self $task) use (&$pending, &$failed, &$woken, $fiber, $token): void {
                 $pending--;
                 if ($failed === null && $task->failed()) {
                     $failed = $task;
@@ -84,13 +100,15 @@ final class Task
                 \Tenma\Internal\suspend($token);
             } catch (\Throwable $error) {
                 // all() itself was cancelled: cancel the children too, and only continue once they have cleaned up
-                self::cancelAndWait($started);
+                self::stopWaiting($started, $listeners);
+                self::cancelAndWait($owned);
                 throw $error;
             }
         }
         if ($failed !== null) {
             // Only the first error counts; the others are consequences of the cancellation
-            $cancelled = self::cancelAndWait($started);
+            self::stopWaiting($started, $listeners);
+            $cancelled = self::cancelAndWait($owned);
             if ($cancelled !== null) {
                 throw $cancelled;
             }
@@ -125,6 +143,20 @@ final class Task
             return;
         }
         \Tenma\Internal\await(\tenma_op_sleep(\Tenma\Internal\milliseconds($seconds)));
+    }
+
+    /**
+     * Removes the listeners all() put on its tasks, so a passed-in task that keeps running does not
+     * hold the waiting Fiber.
+     *
+     * @param array<array-key, self> $tasks
+     * @param array<array-key, int> $listeners
+     */
+    private static function stopWaiting(array $tasks, array $listeners): void
+    {
+        foreach ($tasks as $key => $task) {
+            $task->offSettled($listeners[$key]);
+        }
     }
 
     /**

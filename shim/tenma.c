@@ -872,6 +872,20 @@ static void wrap_ops(php_stream *stream) {
     pthread_mutex_unlock(&wrapped_lock);
 }
 
+/**
+ * Whether the running Fiber belongs to a task of tenma's scheduler (Scheduler::$taskOfFiber):
+ * only those wait as ops. A Fiber the application created blocks, as in plain PHP.
+ */
+static bool in_task(void) {
+    zend_fiber *fiber = EG(active_fiber);
+    if (fiber == NULL) {
+        return false;
+    }
+    zend_class_entry *scheduler = zend_hash_str_find_ptr(EG(class_table), ZEND_STRL("tenma\\internal\\scheduler"));
+    zval *tasks = scheduler ? zend_read_static_property(scheduler, ZEND_STRL("taskOfFiber"), 1) : NULL;
+    return tasks && Z_TYPE_P(tasks) == IS_ARRAY && zend_hash_index_exists(Z_ARRVAL_P(tasks), fiber->std.handle);
+}
+
 /** Calls Tenma\Internal\await($op) from C: 1 with the op's value in result, 0 if it threw (the exception is pending). */
 static int await_op(uint64_t op, zval *result) {
     zval function, argument;
@@ -900,7 +914,7 @@ static int64_t timeout_ms(const struct timeval *timeout) {
  * or a pending exception (the fiber was cancelled while waiting).
  */
 static int wait_fd(int fd, int events, const struct timeval *timeout) {
-    if (EG(active_fiber) != NULL && !EG(exception) && tenma_rs_looping()) {
+    if (!EG(exception) && tenma_rs_looping() && in_task()) {
         uint64_t op = tenma_rs_wait_fd(fd, events, timeout_ms(timeout));
         if (op != 0) {
             zval result;
@@ -1221,7 +1235,7 @@ static ZEND_NAMED_FUNCTION(tenma_stream_select) {
     zval *read, *write, *except;
     zend_long sec, usec = 0;
     bool sec_null, usec_null = 1;
-    if (EG(active_fiber) == NULL || !tenma_rs_looping()) {
+    if (!tenma_rs_looping() || !in_task()) {
         original_stream_select(INTERNAL_FUNCTION_PARAM_PASSTHRU);
         return;
     }
@@ -1423,7 +1437,7 @@ static int pg_call(pdo_dbh_t *dbh, pdo_stmt_t *stmt, const char *op, const char 
     tenma_pg_handle *H = dbh->driver_data;
     *buffer = NULL;
     struct pdo_result out = {NULL, 0, 0};
-    uint64_t id = tenma_rs_pdo(op, strlen(op), H->id, sql, sql_len, params, params_len, EG(active_fiber) == NULL, &out);
+    uint64_t id = tenma_rs_pdo(op, strlen(op), H->id, sql, sql_len, params, params_len, !in_task(), &out);
     if (id != 0) {
         zval result;
         if (!await_op(id, &result)) {

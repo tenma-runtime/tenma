@@ -48,7 +48,8 @@ public static function all(\Threading\Task|callable ...$tasks): array
 Runs everything concurrently and returns the results with the same keys:
 Task::all(user: fn () => …, stats: fn () => …). If one fails, all() cancels
 the others, waits until they have cleaned up, and then throws the first error: nothing is left
-behind in the background that still uses connections, transactions or the stream.
+behind in the background that still uses connections, transactions or the stream. A Task passed
+in is not cancelled: all() only stops waiting for it, as await() does.
 
 **Parameters**
 

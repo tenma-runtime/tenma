@@ -216,6 +216,8 @@ fn fibers_wait_without_blocking_the_server() {
     );
     assert!(get(port, "/cancel-race").ends_with("b cancelled\n"));
     assert!(get(port, "/cancel-all").ends_with("children cancelled\n"));
+    assert!(get(port, "/all-self").ends_with("rejected\n"));
+    assert!(get(port, "/all-keeps-passed").ends_with("kept\n"));
     assert!(get(port, "/nested").ends_with("[\"hello\\n\",\"inner\"]\n"));
     assert!(get(port, "/unreachable").starts_with("HTTP/1.1 500"));
     assert!(get(port, "/bad-method").ends_with("invalid method\n"));
@@ -4626,6 +4628,10 @@ fn php_sockets_suspend_only_the_fiber() {
     // Each wait is half a second: together under one second, never the sum
     timed(&tail("/three"), "echo:a,echo:b,echo:c", 1.0);
     timed(&tail("/select"), "select ok", 1.0);
+    assert_eq!(tail("/user-fiber"), "echo:mine\n");
+    timed(&tail("/same-socket"), "echo:twice 1", 1.0);
+    assert_eq!(tail("/read-write"), "1 0 1\n");
+    assert_eq!(tail("/dev-null"), "1\n");
     let except = tail("/select-except");
     assert!(except.starts_with("except 0 0."), "{except}");
     timed(&tail("/timeout"), "false timed_out=true", 0.4);

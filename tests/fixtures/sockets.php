@@ -42,6 +42,37 @@ new Server($port, function (Request $request) use ($ask, $port, $echo) {
             // One or both answers may be in by now; the array keeps only the ready ones, under their keys
             $which = $ready >= 1 && count($read) === $ready && array_filter($read, fn ($s) => $s !== $x && $s !== $y) === [] ? 'ok' : 'wrong';
             return "select $which " . $seconds() . "\n";
+        case '/user-fiber':
+            // A Fiber of the application blocks on its I/O as in PHP: tenma does not suspend it
+            $fiber = new Fiber(fn () => $ask('mine'));
+            $fiber->start();
+            return ($fiber->isTerminated() ? $fiber->getReturn() : 'suspended') . "\n";
+        case '/same-socket':
+            // Two waits on one descriptor: a read in one task, stream_select() in another
+            $socket = fsockopen('127.0.0.1', $echo);
+            fwrite($socket, "twice\n");
+            [$line, $ready] = Task::all(fn () => fgets($socket), function () use ($socket) {
+                $read = [$socket];
+                $write = null;
+                $except = null;
+                return stream_select($read, $write, $except, 3);
+            });
+            return trim((string) $line) . " $ready " . $seconds() . "\n";
+        case '/read-write':
+            // The usual loop with output pending: the socket is writable at once, not "nothing ready"
+            $socket = fsockopen('127.0.0.1', $echo);
+            $read = [$socket];
+            $write = [$socket];
+            $except = null;
+            $ready = stream_select($read, $write, $except, null);
+            return "$ready " . count($read) . ' ' . count($write) . "\n";
+        case '/dev-null':
+            // A file is always ready, as poll() says
+            $file = fopen('/dev/null', 'r');
+            $read = [$file];
+            $write = null;
+            $except = null;
+            return stream_select($read, $write, $except, null) . "\n";
         case '/select-except':
             // An except set goes to PHP's own select: ordinary data is not out-of-band
             $socket = fsockopen('127.0.0.1', $echo);

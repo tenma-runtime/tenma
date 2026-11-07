@@ -152,6 +152,32 @@ $left = ['interval' => 0, 'message' => 0, 'task' => 0, 'detached' => 0, 'retried
             });
             $a->await();
             return $b->await();
+        case '/all-self':
+            // The running task in its own all(): rejected instead of spinning forever
+            $task = null;
+            $task = \Threading\Task::run(function () use (&$task) {
+                \Threading\Task::delay(0.01);
+                try {
+                    \Threading\Task::all($task, fn () => throw new RuntimeException('sibling'));
+                } catch (LogicException) {
+                    return "rejected\n";
+                }
+            });
+            return $task->await();
+        case '/all-keeps-passed':
+            // A failing sibling cancels only what all() started, not a task passed in
+            $kept = \Threading\Task::detach(function () {
+                \Threading\Task::delay(0.1);
+                return 'kept';
+            });
+            try {
+                \Threading\Task::all($kept, function () {
+                    \Threading\Task::delay(0.02);
+                    throw new RuntimeException('sibling');
+                });
+            } catch (RuntimeException) {
+            }
+            return $kept->await() . "\n";
         case '/cancel-all':
             $late = false;
             $task = \Threading\Task::run(fn () => \Threading\Task::all(fn () => \Threading\Task::delay(0.3), function () use (&$late) {

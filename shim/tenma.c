@@ -99,8 +99,8 @@ extern void tenma_rs_exit(int status);
 extern void tenma_rs_included(const char *path, size_t len);
 /** tenma --watch: the length of the path of the change behind this run, copied into buffer if it fits; SIZE_MAX for none. */
 extern size_t tenma_rs_reloaded_by(char *buffer, size_t capacity);
-/** tenma --watch: the script wrote this file itself, its change reloads nothing. */
-extern void tenma_rs_written(const char *path, size_t len);
+/** tenma --watch: the script is about to write this content into this file, its change reloads nothing. */
+extern void tenma_rs_writing(const char *path, size_t len, const char *content, size_t content_len);
 /** tenma --inspect: a statement is about to run, see inspect_statement. */
 extern void tenma_rs_statement(const char *file, size_t file_len, uint32_t line, uintptr_t frame, uintptr_t fiber);
 /** tenma --inspect: a function is about to return, at its closing brace on `line`. */
@@ -368,11 +368,12 @@ ZEND_END_ARG_INFO()
 
 PHP_FUNCTION(tenma_reloaded_by);
 
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_tenma_watch_written, 0, 1, IS_VOID, 0)
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_tenma_watch_writing, 0, 2, IS_VOID, 0)
     ZEND_ARG_TYPE_INFO(0, path, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, content, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
-PHP_FUNCTION(tenma_watch_written);
+PHP_FUNCTION(tenma_watch_writing);
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_tenma_pubsub, 0, 4, IS_LONG, 0)
     ZEND_ARG_TYPE_INFO(0, op, IS_STRING, 0)
@@ -464,7 +465,7 @@ static const zend_function_entry tenma_functions[] = {
     ZEND_FE(tenma_stop_handlers, arginfo_tenma_stop_handlers)
     ZEND_FE(tenma_debugger, arginfo_tenma_shutdown)
     ZEND_FE(tenma_reloaded_by, arginfo_tenma_reloaded_by)
-    ZEND_FE(tenma_watch_written, arginfo_tenma_watch_written)
+    ZEND_FE(tenma_watch_writing, arginfo_tenma_watch_writing)
     ZEND_FE(tenma_classic_begin, arginfo_tenma_shutdown)
     ZEND_FE(tenma_take_output, arginfo_tenma_take_output)
     ZEND_FE_END
@@ -3121,13 +3122,15 @@ PHP_FUNCTION(tenma_reloaded_by) {
     RETURN_NEW_STR(path);
 }
 
-PHP_FUNCTION(tenma_watch_written) {
+PHP_FUNCTION(tenma_watch_writing) {
     char *path;
     size_t path_len;
-    ZEND_PARSE_PARAMETERS_START(1, 1)
+    zend_string *content;
+    ZEND_PARSE_PARAMETERS_START(2, 2)
         Z_PARAM_PATH(path, path_len)
+        Z_PARAM_STR(content)
     ZEND_PARSE_PARAMETERS_END();
-    tenma_rs_written(path, path_len);
+    tenma_rs_writing(path, path_len, ZSTR_VAL(content), ZSTR_LEN(content));
 }
 
 PHP_FUNCTION(tenma_debugger) {

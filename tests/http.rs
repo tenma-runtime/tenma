@@ -2556,19 +2556,20 @@ fn reloaded_by_is_the_change_only_for_the_run_it_caused() {
 
 #[test]
 fn a_file_the_script_wrote_itself_reloads_nothing() {
-    // Each request writes and loads a file; the run's id tells whether the script ran again
+    // Each request writes and loads a file; the run's id tells whether the script ran again. The pause
+    // after the write outlasts the watcher's settling: an announcement after the write would come late
     let run = |port: u16, name: &str, written: bool| {
         let directory = scratch(name);
         let app = directory.join("app.php");
         let mark = if written {
-            "\\Development\\Watch::written($file);"
+            "\\Development\\Watch::writing($file, $php);"
         } else {
             ""
         };
         std::fs::write(
             &app,
             format!(
-                "<?php\n$file = __DIR__ . '/compiled.php';\n$run = bin2hex(random_bytes(4));\n(new \\Http\\Server({port}, function () use ($file, $run) {{\n    file_put_contents($file, '<?php return ' . random_int(0, PHP_INT_MAX) . ';');\n    {mark}\n    include $file;\n    return $run . \"\\n\";\n}}))->start();\n"
+                "<?php\n$file = __DIR__ . '/compiled.php';\n$run = bin2hex(random_bytes(4));\n(new \\Http\\Server({port}, function () use ($file, $run) {{\n    $php = '<?php return ' . random_int(0, PHP_INT_MAX) . ';';\n    {mark}\n    file_put_contents($file, $php);\n    usleep(300000);\n    include $file;\n    return $run . \"\\n\";\n}}))->start();\n"
             ),
         )
         .unwrap();

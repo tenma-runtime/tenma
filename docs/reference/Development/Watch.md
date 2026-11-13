@@ -26,15 +26,17 @@ The file whose change made the script run again, null on the first run and witho
 
 **Returns** `?string`
 
-### written()
+### writing()
 
 ```php
-public static function written(string $file): void
+public static function writing(string $file, string $content): void
 ```
 
-Tells --watch that the script wrote $file itself, such as a template it compiled and loads:
-that change reloads nothing. Call it after the file is written. Without --watch it does nothing.
+Tells --watch that the script is about to write $content into $file itself, such as a template
+it compiled and loads: that change reloads nothing. Call it before the write (or the rename
+that puts the file in place). Without --watch it does nothing.
 
 **Parameters**
 
 - `$file` `string`
+- `$content` `string`

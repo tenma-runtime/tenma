@@ -33,8 +33,8 @@ enum Message {
     Loaded(PathBuf, u8, SystemTime),
     /// Directories the hooks read, recursively or not, and the project they belong to.
     Roots(Vec<(PathBuf, bool)>, PathBuf),
-    /// A file the script wrote itself (Watch::written()): its content now is no change.
-    Written(PathBuf),
+    /// A file the script is about to write (Watch::writing()) and its content's fingerprint.
+    Writing(PathBuf, u64),
     Event(notify::Result<notify::Event>),
 }
 
@@ -77,14 +77,29 @@ extern "C" fn tenma_rs_included(path: *const u8, len: usize) {
     }
 }
 
-/// Watch::written(): the script wrote the file itself, such as a compiled template it loads.
+/// Watch::writing(): the script is about to write the file itself, such as a compiled template it
+/// loads. Sent before the write, so the watcher knows the content before any event of it comes.
 #[unsafe(no_mangle)]
-extern "C" fn tenma_rs_written(path: *const u8, len: usize) {
+extern "C" fn tenma_rs_writing(
+    path: *const u8,
+    len: usize,
+    content: *const u8,
+    content_len: usize,
+) {
     if let Some(watcher) = WATCHER.get() {
         let path = Path::new(std::ffi::OsStr::from_bytes(crate::php::bytes(path, len)));
-        // Named like PHP names the files it loads: resolved
-        let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        let _ = watcher.send(Message::Written(path));
+        // Named like PHP names the files it loads: resolved, through its directory while it is new
+        let path = path.canonicalize().unwrap_or_else(|_| {
+            match (
+                path.parent().and_then(|dir| dir.canonicalize().ok()),
+                path.file_name(),
+            ) {
+                (Some(dir), Some(name)) => dir.join(name),
+                _ => path.to_path_buf(),
+            }
+        });
+        let content = crate::php::bytes(content, content_len);
+        let _ = watcher.send(Message::Writing(path, fingerprint_of(content)));
     }
 }
 
@@ -319,11 +334,10 @@ fn watch(
                     roots.push(root);
                 }
             }
-            // Its fingerprint now: the events of that write compare equal and reload nothing, and
+            // The content to come: the events of that write compare equal and reload nothing, and
             // loading it later is no first sight that counts as a change
-            Ok(Message::Written(path)) => {
-                let now = fingerprint(&path);
-                files.insert(path, now);
+            Ok(Message::Writing(path, coming)) => {
+                files.insert(path, Some(coming));
             }
             Ok(Message::Event(Ok(event))) if event.need_rescan() => {
                 candidates.extend(files.keys().cloned());
@@ -528,8 +542,11 @@ mod tests {
 }
 
 fn fingerprint(path: &Path) -> Option<u64> {
-    let content = std::fs::read(path).ok()?;
+    Some(fingerprint_of(&std::fs::read(path).ok()?))
+}
+
+fn fingerprint_of(content: &[u8]) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
     content.hash(&mut hasher);
-    Some(hasher.finish())
+    hasher.finish()
 }

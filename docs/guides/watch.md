@@ -15,7 +15,7 @@ tenma build              # run the hooks of ./tenma.json once
 | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `--watch`                                                                         | reloads the workers when a loaded file changes                           |
 | [`Development\Watch::reloadedBy()`](../reference/Development/Watch.md#reloadedby) | the file whose change caused the current run, or `null` on the first run |
-| [`Development\Watch::written()`](../reference/Development/Watch.md#written)       | a file the script wrote itself, whose change reloads nothing             |
+| [`Development\Watch::writing()`](../reference/Development/Watch.md#writing)       | a file the script is about to write, whose change reloads nothing        |
 | `hooks` in `tenma.json`                                                           | build steps                                                              |
 | `tenma build [tenma.json]`                                                        | runs every hook once, for CI and Docker                                  |
 | [`Development\Problems::report()`](diagnostics.md)                                | under `--watch`, problems the app reports appear in the editor           |
@@ -46,15 +46,15 @@ new Http\Server(8080, fn () => "ok\n")->start();
 
 ### Files the script writes
 
-A framework that compiles templates into PHP files and loads them with `include` changes a loaded file itself. Without more, that reloads the workers and cuts off the requests running at the time. `Development\Watch::written()` after the write tells `--watch` that this change needs no reload:
+A framework that compiles templates into PHP files and loads them with `include` changes a loaded file itself. Without more, that reloads the workers and cuts off the requests running at the time. `Development\Watch::writing()` before the write tells `--watch` what the file is about to hold, so that change needs no reload:
 
 ```php
 <?php
 
 use Development\Watch;
 
+Watch::writing($compiled, $php);
 file_put_contents($compiled, $php);
-Watch::written($compiled);
 
 include $compiled;
 ```

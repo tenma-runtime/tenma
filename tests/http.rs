@@ -2592,13 +2592,13 @@ fn a_file_the_script_wrote_itself_reloads_nothing() {
         let _ = std::fs::remove_dir_all(directory);
         runs
     };
-    let written = run(18_173, "written-by-script", true);
+    let written = run(18_100, "written-by-script", true);
     assert!(
         written.iter().all(|response| *response == written[0]),
         "{written:?}"
     );
     // Without the call the same writes reload the script
-    let unmarked = run(18_174, "written-unmarked", false);
+    let unmarked = run(18_101, "written-unmarked", false);
     assert!(
         unmarked.iter().any(|response| *response != unmarked[0]),
         "{unmarked:?}"

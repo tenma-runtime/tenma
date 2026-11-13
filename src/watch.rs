@@ -23,6 +23,9 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 /// no event came for SETTLE, at the latest after MAX_SETTLE.
 const SETTLE: Duration = Duration::from_millis(100);
 const MAX_SETTLE: Duration = Duration::from_secs(1);
+/// How long a file the script announced (Watch::writing()) may differ from the announced content:
+/// meanwhile it still holds the old content or is half written, which is no change of its own.
+const ANNOUNCED: Duration = Duration::from_secs(2);
 
 /// Who loaded a file: the workers running the script, or the dev thread running the hooks.
 const APP: u8 = 1;
@@ -271,6 +274,8 @@ fn watch(
     let mut roots: Vec<(PathBuf, bool)> = Vec::new();
     let mut project = PathBuf::new();
     let mut candidates = HashSet::new();
+    // Files the script is about to write: the content to come, and since when
+    let mut announced: HashMap<PathBuf, (u64, Instant)> = HashMap::new();
     // Since when events come, and until when to wait for more
     let mut settle: Option<(Instant, Instant)> = None;
     loop {
@@ -337,7 +342,8 @@ fn watch(
             // The content to come: the events of that write compare equal and reload nothing, and
             // loading it later is no first sight that counts as a change
             Ok(Message::Writing(path, coming)) => {
-                files.insert(path, Some(coming));
+                files.insert(path.clone(), Some(coming));
+                announced.insert(path, (coming, Instant::now()));
             }
             Ok(Message::Event(Ok(event))) if event.need_rescan() => {
                 candidates.extend(files.keys().cloned());
@@ -376,8 +382,23 @@ fn watch(
                 // Compared only now that the writing has settled: no reload for a half-written file
                 let mut batch = Changes::default();
                 let mut hook_paths = Vec::new();
+                let mut later = Vec::new();
                 for path in candidates.drain() {
                     let now = fingerprint(&path);
+                    // An announced write: done once the content is there, not yet while the file still
+                    // differs, a change of its own only when that takes longer than ANNOUNCED
+                    if let Some(&(coming, since)) = announced.get(&path) {
+                        if now == Some(coming) {
+                            announced.remove(&path);
+                            files.insert(path, now);
+                            continue;
+                        }
+                        if since.elapsed() < ANNOUNCED {
+                            later.push(path);
+                            continue;
+                        }
+                        announced.remove(&path);
+                    }
                     // A file seen for the first time counts as changed
                     if files.insert(path.clone(), now) == Some(now) {
                         continue;
@@ -400,6 +421,10 @@ fn watch(
                                 .map_or(0.0, |since| since.as_secs_f64()),
                         ));
                     }
+                }
+                if !later.is_empty() {
+                    candidates.extend(later);
+                    wait_for_more(&mut settle);
                 }
                 if !hook_paths.is_empty() {
                     let _ = hooks.send(hook_paths);

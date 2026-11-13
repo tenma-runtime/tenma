@@ -33,6 +33,8 @@ enum Message {
     Loaded(PathBuf, u8, SystemTime),
     /// Directories the hooks read, recursively or not, and the project they belong to.
     Roots(Vec<(PathBuf, bool)>, PathBuf),
+    /// A file the script wrote itself (Watch::written()): its content now is no change.
+    Written(PathBuf),
     Event(notify::Result<notify::Event>),
 }
 
@@ -72,6 +74,17 @@ extern "C" fn tenma_rs_included(path: *const u8, len: usize) {
             GROUP.get(),
             SINCE.get(),
         ));
+    }
+}
+
+/// Watch::written(): the script wrote the file itself, such as a compiled template it loads.
+#[unsafe(no_mangle)]
+extern "C" fn tenma_rs_written(path: *const u8, len: usize) {
+    if let Some(watcher) = WATCHER.get() {
+        let path = Path::new(std::ffi::OsStr::from_bytes(crate::php::bytes(path, len)));
+        // Named like PHP names the files it loads: resolved
+        let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let _ = watcher.send(Message::Written(path));
     }
 }
 
@@ -305,6 +318,12 @@ fn watch(
                     }
                     roots.push(root);
                 }
+            }
+            // Its fingerprint now: the events of that write compare equal and reload nothing, and
+            // loading it later is no first sight that counts as a change
+            Ok(Message::Written(path)) => {
+                let now = fingerprint(&path);
+                files.insert(path, now);
             }
             Ok(Message::Event(Ok(event))) if event.need_rescan() => {
                 candidates.extend(files.keys().cloned());

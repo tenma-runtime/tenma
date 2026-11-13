@@ -2554,6 +2554,57 @@ fn reloaded_by_is_the_change_only_for_the_run_it_caused() {
     let _ = std::fs::remove_dir_all(directory);
 }
 
+#[test]
+fn a_file_the_script_wrote_itself_reloads_nothing() {
+    // Each request writes and loads a file; the run's id tells whether the script ran again
+    let run = |port: u16, name: &str, written: bool| {
+        let directory = scratch(name);
+        let app = directory.join("app.php");
+        let mark = if written {
+            "\\Development\\Watch::written($file);"
+        } else {
+            ""
+        };
+        std::fs::write(
+            &app,
+            format!(
+                "<?php\n$file = __DIR__ . '/compiled.php';\n$run = bin2hex(random_bytes(4));\n(new \\Http\\Server({port}, function () use ($file, $run) {{\n    file_put_contents($file, '<?php return ' . random_int(0, PHP_INT_MAX) . ';');\n    {mark}\n    include $file;\n    return $run . \"\\n\";\n}}))->start();\n"
+            ),
+        )
+        .unwrap();
+        let server = Server(
+            Command::new(env!("CARGO_BIN_EXE_tenma"))
+                .args(["--watch", "--workers", "1"])
+                .arg(&app)
+                .spawn()
+                .unwrap(),
+        );
+        // The body alone: the headers carry the time
+        let body = |response: String| response.lines().last().unwrap_or_default().to_string();
+        let mut runs = vec![body(get(port, "/"))];
+        for _ in 0..3 {
+            std::thread::sleep(Duration::from_millis(500));
+            runs.push(body(eventually(port, "/", |response| {
+                response.ends_with('\n')
+            })));
+        }
+        drop(server);
+        let _ = std::fs::remove_dir_all(directory);
+        runs
+    };
+    let written = run(18_173, "written-by-script", true);
+    assert!(
+        written.iter().all(|response| *response == written[0]),
+        "{written:?}"
+    );
+    // Without the call the same writes reload the script
+    let unmarked = run(18_174, "written-unmarked", false);
+    assert!(
+        unmarked.iter().any(|response| *response != unmarked[0]),
+        "{unmarked:?}"
+    );
+}
+
 /// A project with two hooks, listed against their order: a command copies the CSS, PHP minifies
 /// the copy and counts its runs.
 fn hook_project(name: &str) -> std::path::PathBuf {

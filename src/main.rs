@@ -49,7 +49,7 @@ use tokio::sync::Notify;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::LocalSet;
 
-const USAGE: &str = "Usage: tenma [--watch] [--inspect[-wait|-brk][=[HOST:]PORT]] [--workers N|auto] [--max-body SIZE] [--max-requests N] [--db-pool N] [-d name=value] [-c php.ini] [-r code] [--server-name NAME] [--request-timeout SECONDS] [--max-connections N] [--pubsub redis://HOST] [--pdo-pgsql native] [--durable postgres://URL] [--plugin FILE] [--config tenma.json] [--stop-timeout SECONDS] [--record DIR [--record-on error] [--record-max-size SIZE] [--record-max-body SIZE] [--record-redact HEADER,...]] [--tls-cert FILE --tls-key FILE [--tls-port N]] <script.php> [arguments …]\n       tenma build [tenma.json]   (runs the hooks of tenma.json once)\n       tenma check [script.php|tenma.json]   (checks the options, hooks and plugins of tenma.json without starting)\n       tenma --stubs [DIR]   (the PHP API as stubs for IDEs and PHPStan; with DIR one file per class)\n       tenma install|update|remove composer   (Composer for tenma composer)\n       tenma composer [arguments …]   (runs Composer)\n       tenma lsp   (the language server for editors, on stdin and stdout)\n       tenma docs [<path>...] [--out <dir>]   (Markdown reference pages for PHP classes and functions; without paths for Tenma's API)\n       tenma replay FILE [--until N | --request N] [--check]   (plays a recorded journal into a fresh interpreter, without I/O)\n       tenma replay FILE --list   (the requests of a journal, numbered for --request)\n       tenma --version";
+const USAGE: &str = "Usage: tenma [--watch] [--inspect[-wait|-brk][=[HOST:]PORT]] [--workers N|auto] [--host ADDRESS] [--max-body SIZE] [--max-requests N] [--db-pool N] [-d name=value] [-c php.ini] [-r code] [--server-name NAME] [--request-timeout SECONDS] [--max-connections N] [--pubsub redis://HOST] [--pdo-pgsql native] [--durable postgres://URL] [--plugin FILE] [--config tenma.json] [--stop-timeout SECONDS] [--record DIR [--record-on error] [--record-max-size SIZE] [--record-max-body SIZE] [--record-redact HEADER,...]] [--tls-cert FILE --tls-key FILE [--tls-port N]] <script.php> [arguments …]\n       tenma build [tenma.json]   (runs the hooks of tenma.json once)\n       tenma check [script.php|tenma.json]   (checks the options, hooks and plugins of tenma.json without starting)\n       tenma --stubs [DIR]   (the PHP API as stubs for IDEs and PHPStan; with DIR one file per class)\n       tenma install|update|remove composer   (Composer for tenma composer)\n       tenma composer [arguments …]   (runs Composer)\n       tenma lsp   (the language server for editors, on stdin and stdout)\n       tenma docs [<path>...] [--out <dir>]   (Markdown reference pages for PHP classes and functions; without paths for Tenma's API)\n       tenma replay FILE [--until N | --request N] [--check]   (plays a recorded journal into a fresh interpreter, without I/O)\n       tenma replay FILE --list   (the requests of a journal, numbered for --request)\n       tenma --version";
 /// How long running requests may take to finish on shutdown or restart.
 const DRAIN: Duration = Duration::from_secs(10);
 /// With --watch: an open SSE or WebSocket connection should not hold up every reload for 10 s.
@@ -86,6 +86,8 @@ struct Options {
     request_timeout: Duration,
     /// Open connections per worker; more get 503.
     max_connections: usize,
+    /// --host: the address every server listens on.
+    host: std::net::IpAddr,
     /// Reload when a file the script loaded changes.
     watch: bool,
     /// How long running requests may take to finish on shutdown or restart.
@@ -347,6 +349,7 @@ fn parse_args(given: &[String]) -> Result<(Vec<String>, Options), String> {
         max_requests: None,
         request_timeout: Duration::from_secs(30),
         max_connections: 1024,
+        host: std::net::Ipv4Addr::UNSPECIFIED.into(),
         watch: false,
         drain: DRAIN,
         inspect: None,
@@ -444,6 +447,12 @@ fn parse_args(given: &[String]) -> Result<(Vec<String>, Options), String> {
                     .ok()
                     .filter(|&count| count > 0)
                     .ok_or(format!("--max-connections {number}: not a number above 0"))?;
+            }
+            "--host" => {
+                let address = value("--host")?;
+                options.host = address
+                    .parse()
+                    .map_err(|_| format!("--host {address}: not an IP address"))?;
             }
             "--server-name" => php::set_server_name(&value("--server-name")?)?,
             "--pubsub" => pubsub::use_redis(&value("--pubsub")?)?,
@@ -721,10 +730,10 @@ fn with_config(given: &[String]) -> Result<Vec<String>, String> {
             }
         };
         match key.as_str() {
-            "workers" | "max-body" | "max-requests" | "max-connections" | "request-timeout"
-            | "db-pool" | "pubsub" | "pdo-pgsql" | "durable" | "server-name" | "tls-cert"
-            | "tls-key" | "c" | "record" | "record-on" | "record-max-body" | "record-max-size"
-            | "record-redact" | "stop-timeout" => {
+            "workers" | "host" | "max-body" | "max-requests" | "max-connections"
+            | "request-timeout" | "db-pool" | "pubsub" | "pdo-pgsql" | "durable"
+            | "server-name" | "tls-cert" | "tls-key" | "c" | "record" | "record-on"
+            | "record-max-body" | "record-max-size" | "record-redact" | "stop-timeout" => {
                 front.push(option);
                 front.push(scalar(value)?);
             }
@@ -890,7 +899,7 @@ fn run(argv: &[String], options: Options) -> u8 {
             tokio::spawn(reload_certificate_on_hangup());
         }
         for port in ports {
-            tokio::spawn(accept(port, senders.clone()));
+            tokio::spawn(accept(options.host, port, senders.clone()));
         }
         let shutdown = shutdown_signal();
         tokio::pin!(shutdown);
@@ -1743,11 +1752,11 @@ where
 
 /// Accepts connections and hands them to the workers round-robin.
 // ponytail: round-robin without looking at load; least busy workers first if requests differ a lot in cost
-async fn accept(port: u16, workers: Vec<UnboundedSender<Connection>>) {
-    let socket = match TcpListener::bind(("0.0.0.0", port)).await {
+async fn accept(host: std::net::IpAddr, port: u16, workers: Vec<UnboundedSender<Connection>>) {
+    let socket = match TcpListener::bind((host, port)).await {
         Ok(socket) => socket,
         Err(error) => {
-            eprintln!("tenma: port {port} not available: {error}");
+            eprintln!("tenma: {host} port {port} not available: {error}");
             std::process::exit(1);
         }
     };

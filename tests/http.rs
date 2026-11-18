@@ -5575,3 +5575,38 @@ fn one_request_steps_back_from_its_exception() {
     assert_eq!(dap.stopped().line, 11);
     dap.command("continue");
 }
+
+#[test]
+fn host_limits_where_servers_listen() {
+    let port = 18_231;
+    if std::net::TcpListener::bind(("::1", 0)).is_err() {
+        eprintln!("no IPv6 loopback, test skipped");
+        return;
+    }
+    let _server = Server(
+        Command::new(env!("CARGO_BIN_EXE_tenma"))
+            .args(["--host", "::1", "tests/fixtures/request_response.php"])
+            .env("PORT", port.to_string())
+            .spawn()
+            .unwrap(),
+    );
+    let mut listening = false;
+    for _ in 0..100 {
+        listening = TcpStream::connect(("::1", port)).is_ok();
+        if listening {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(listening, "nothing listens on ::1");
+    assert!(TcpStream::connect(("127.0.0.1", port)).is_err());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_tenma"))
+        .args(["--host", "localhost", "tests/fixtures/request_response.php"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("--host localhost: not an IP address"),
+        "{output:?}"
+    );
+}

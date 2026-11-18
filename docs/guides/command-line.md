@@ -42,6 +42,7 @@ Options come before the script. Each takes its value as the next argument.
 | Option                         | Default                         | Does                                                                                               |
 | ------------------------------ | ------------------------------- | -------------------------------------------------------------------------------------------------- |
 | `--workers N`, `-w N`          | `1`                             | worker threads, each with its own PHP interpreter and state; `auto` starts one per CPU core        |
+| `--host ADDRESS`               | `0.0.0.0`                       | the IP address every server listens on; `127.0.0.1` for a proxy on the same machine, `::` for IPv6 |
 | `--max-body SIZE`              | `10m`                           | largest request body and WebSocket message; bytes, or with `k`, `m`, `g`; 413 above it             |
 | `--max-requests N`             | none                            | a worker restarts its interpreter after N requests                                                 |
 | `--max-connections N`          | `1024`                          | open connections per worker; more get a 503 at once                                                |

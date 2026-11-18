@@ -65,6 +65,7 @@ Everything after the script goes to the script's `$argv`.
 | Option                      | Default                         |                                                                |
 | --------------------------- | ------------------------------- | -------------------------------------------------------------- |
 | `--workers N`, `-w N`       | 1                               | worker threads; `auto` = one per CPU core                      |
+| `--host ADDRESS`            | `0.0.0.0`                       | the IP address every server listens on                         |
 | `--max-body SIZE`           | `10m`                           | largest request body and WebSocket message                     |
 | `--max-requests N`          | none                            | a worker restarts its interpreter after N requests             |
 | `--max-connections N`       | 1024                            | open connections per worker; more get a 503                    |

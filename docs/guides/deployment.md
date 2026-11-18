@@ -81,7 +81,7 @@ example.com {
 }
 ```
 
-`$request->remoteAddress` is then the proxy's address. The client's address is in the header the proxy sets (`X-Forwarded-For`). Trust that header only when the request comes from your proxy.
+`$request->remoteAddress` is then the proxy's address. The client's address is in the header the proxy sets (`X-Forwarded-For`). Trust that header only when the request comes from your proxy. With the proxy on the same machine, start Tenma with `--host 127.0.0.1`: then nothing reaches the app except through the proxy.
 
 To deploy without dropping requests, start the new release on another port, switch the proxy, then stop the old one.
 

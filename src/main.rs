@@ -684,8 +684,10 @@ fn with_config(given: &[String]) -> Result<Vec<String>, String> {
         }
     };
     // A single value the command line also gives: the file's one is left out, so options that take
-    // only one value (--pubsub, --durable, --pdo-pgsql) see the command line's
-    let on_command_line: Vec<&str> = given
+    // only one value (--pubsub, --durable, --pdo-pgsql) see the command line's. What follows the
+    // script belongs to the script.
+    let before_script = &given[..i.min(given.len())];
+    let on_command_line: Vec<&str> = before_script
         .iter()
         .filter_map(|arg| arg.strip_prefix("--"))
         .collect();
@@ -2081,4 +2083,19 @@ fn plain(status: StatusCode, text: &'static str) -> Response<ResponseBody> {
     let mut response = Response::new(Either::Left(Full::new(Bytes::from_static(text.as_bytes()))));
     *response.status_mut() = status;
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::with_config;
+
+    #[test]
+    fn script_arguments_do_not_hide_tenma_json() {
+        let given = ["tests/fixtures/config/app.php", "--workers", "1"].map(String::from);
+        let arguments = with_config(&given).unwrap();
+        let script = arguments.iter().position(|arg| arg.ends_with("app.php"));
+        let workers = arguments.iter().position(|arg| arg == "--workers");
+        assert!(workers < script, "{arguments:?}");
+        assert_eq!(arguments[workers.unwrap() + 1], "2");
+    }
 }

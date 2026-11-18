@@ -80,14 +80,9 @@ pub fn code(path: &Path, watch: bool) -> Result<String, String> {
     let directory = path.parent().unwrap_or(Path::new("."));
     Ok(format!(
         "\\Tenma\\Internal\\dev({}, {}, {watch});",
-        quoted(&directory.to_string_lossy()),
-        quoted(&hooks.to_string())
+        crate::php_string(&directory.to_string_lossy()),
+        crate::php_string(&hooks.to_string())
     ))
-}
-
-/// A single-quoted PHP string.
-fn quoted(text: &str) -> String {
-    format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 /// A receiver that hears once the first run of the hooks is over.

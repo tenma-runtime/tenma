@@ -397,15 +397,19 @@ extern "C" fn tenma_rs_pdo(
     let op = text(op, op_len);
     let sql = std::str::from_utf8(bytes(sql, sql_len)).map(str::to_owned);
     let params = params(bytes(packed, params_len));
-    let detail = format!(
-        "{op} {id} {}",
-        crate::journal::redact(sql.as_deref().unwrap_or_default())
-    );
+    let in_fiber = blocking == 0 && ops::looping();
+    // Only an op has a detail; the blocking path below starts none
+    let detail = if in_fiber {
+        let statement = crate::journal::redact(sql.as_deref().unwrap_or_default());
+        format!("{op} {id} {statement}")
+    } else {
+        String::new()
+    };
     let future = async move {
         let sql = sql.map_err(|_| "the statement is not valid UTF-8")?;
         run(op, id, sql, params).await
     };
-    if blocking == 0 && ops::looping() {
+    if in_fiber {
         let (sender, receiver) = oneshot::channel::<Result<Vec<u8>, String>>();
         jobs()
             .send(Box::pin(async move {

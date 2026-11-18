@@ -46,7 +46,7 @@ struct RawRequest {
 #[repr(C)]
 struct RawResponse {
     status: u16,
-    body: *mut u8,
+    body: *const u8,
     body_len: usize,
     headers: *mut u8,
     headers_len: usize,
@@ -204,7 +204,7 @@ pub fn parse_header_lines(packed: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
         .collect()
 }
 
-/// Copies the response out of C memory and frees it.
+/// Copies the response out of PHP's and C's memory and frees what C allocated.
 unsafe fn take_response(raw: *mut RawResponse) -> Response {
     let raw_ref = unsafe { &*raw };
     let body = bytes(raw_ref.body, raw_ref.body_len).to_vec();
@@ -367,11 +367,11 @@ pub fn pdo_native() {
     unsafe { tenma_set_pdo_native() };
 }
 
-/// A setting like `php -d name=value`. Only before `start`.
 /// The PHP settings of the command line (-d, -c), as a journal's header records them.
 pub static SETTINGS: std::sync::Mutex<(Vec<String>, Option<String>)> =
     std::sync::Mutex::new((Vec::new(), None));
 
+/// A setting like `php -d name=value`. Only before `start`.
 pub fn define_ini(entry: &str) -> Result<(), String> {
     SETTINGS.lock().unwrap().0.push(entry.to_owned());
     let entry = CString::new(entry).map_err(|_| "setting contains a null byte")?;

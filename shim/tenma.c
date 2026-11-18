@@ -58,10 +58,11 @@ typedef struct {
     tenma_str protocol;
 } tenma_request;
 
-/** Owned by Rust after tenma_handle; free with tenma_response_free. */
+/** For tenma_rs_respond, which copies the body and frees the rest with tenma_response_free. */
 typedef struct {
     uint16_t status;
-    char *body;
+    /** Borrowed from the PHP string: valid until tenma_rs_respond returns. */
+    const char *body;
     size_t body_len;
     /** Header lines as with header(): "Name: Value\0Name: Value\0" … */
     char *headers;
@@ -70,7 +71,7 @@ typedef struct {
 
 /** Rust stores port and handler; returns 0 if the port is invalid. */
 extern int tenma_rs_listen(zend_long port, uint32_t handler, const char *mounts, size_t mounts_len);
-/** Hands Rust the response to request rid. Rust frees it with tenma_response_free. */
+/** Hands Rust the response to request rid. Rust copies the body and frees the headers with tenma_response_free. */
 extern void tenma_rs_respond(uint64_t rid, tenma_response *response);
 /** Async ops: Rust starts them and returns an op ID; Rust reports completion via tenma_complete_*. */
 extern uint64_t tenma_rs_sleep(zend_long milliseconds);
@@ -733,7 +734,6 @@ static int tenma_startup(sapi_module_struct *sapi) {
     return SUCCESS;
 }
 
-/** Starts PHP with the tenma module. Afterwards exactly one PHP request runs, until tenma_stop. */
 /**
  * Signals belong to Rust: on every request startup PHP installs its own handlers for SIGTERM, SIGINT
  * and co., which pass on to the default action and would kill tenma at once. Remove them before
@@ -2267,6 +2267,7 @@ static struct {
     /** 1: the function blocks the worker; only noted, never replaced */
     int blocking;
     zif_handler original;
+    size_t name_len;
 } journaled[] = {
     {"time", 0, NULL}, {"microtime", 0, NULL}, {"hrtime", 0, NULL}, {"date", 0, NULL}, {"gmdate", 0, NULL},
     {"idate", 0, NULL}, {"localtime", 0, NULL}, {"getdate", 0, NULL}, {"mktime", 0, NULL}, {"gmmktime", 0, NULL},
@@ -2283,9 +2284,10 @@ static ZEND_NAMED_FUNCTION(journaled_function) {
     zif_handler original = NULL;
     int blocking = 0;
     for (size_t i = 0; i < sizeof(journaled) / sizeof(journaled[0]); i++) {
-        if (zend_string_equals_cstr(name, journaled[i].name, strlen(journaled[i].name))) {
+        if (zend_string_equals_cstr(name, journaled[i].name, journaled[i].name_len)) {
             original = journaled[i].original;
             blocking = journaled[i].blocking;
+            break;
         }
     }
     if (original == NULL) {
@@ -2342,7 +2344,8 @@ static ZEND_NAMED_FUNCTION(journaled_function) {
 
 static void wrap_journaled(void) {
     for (size_t i = 0; i < sizeof(journaled) / sizeof(journaled[0]); i++) {
-        zend_function *function = zend_hash_str_find_ptr(CG(function_table), journaled[i].name, strlen(journaled[i].name));
+        journaled[i].name_len = strlen(journaled[i].name);
+        zend_function *function = zend_hash_str_find_ptr(CG(function_table), journaled[i].name, journaled[i].name_len);
         if (function != NULL && function->type == ZEND_INTERNAL_FUNCTION) {
             journaled[i].original = function->internal_function.handler;
             function->internal_function.handler = journaled_function;
@@ -2350,9 +2353,12 @@ static void wrap_journaled(void) {
     }
 }
 
-/** binary: tenma's own path, for the PHP_BINARY constant (NULL leaves it empty). */
+/**
+ * Starts PHP with the tenma module. Afterwards exactly one PHP request runs, until tenma_stop.
+ * binary: tenma's own path, for the PHP_BINARY constant (NULL leaves it empty).
+ */
 int tenma_start(const char *binary) {
-    // Like console.log, echo reaches the console at once, even when stdout is a pipe
+    // echo reaches the console at once, even when stdout is a pipe
     setvbuf(stdout, NULL, _IOLBF, 0);
     php_embed_module.startup = tenma_startup;
     php_embed_module.read_post = tenma_read_post;
@@ -3371,9 +3377,8 @@ static int read_response(zval *value, tenma_response *response) {
 
     response->status = (uint16_t) Z_LVAL_P(status);
     response->headers = pack_lines(Z_ARRVAL_P(headers), &response->headers_len);
+    response->body = Z_STRVAL_P(body);
     response->body_len = Z_STRLEN_P(body);
-    response->body = malloc(response->body_len ? response->body_len : 1);
-    memcpy(response->body, Z_STRVAL_P(body), response->body_len);
     return 1;
 }
 
@@ -4302,6 +4307,5 @@ int tenma_handle(uint32_t handler, uint64_t rid, const tenma_request *request) {
 }
 
 void tenma_response_free(tenma_response *response) {
-    free(response->body);
     free(response->headers);
 }

@@ -874,11 +874,7 @@ pub fn hash_file(path: &str) -> String {
     match std::fs::read(path) {
         Ok(data) => {
             let digest = ring::digest::digest(&ring::digest::SHA256, &data);
-            digest
-                .as_ref()
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect()
+            crate::hex(digest.as_ref())
         }
         Err(_) => String::new(),
     }

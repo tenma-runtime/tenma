@@ -73,7 +73,7 @@ final class Timer
 
     private function __construct(
         private readonly \Closure $callback,
-        private readonly int $milliseconds,
+        int $milliseconds,
         private readonly bool $repeat,
         private readonly bool $loop = false,
     ) {
@@ -104,7 +104,7 @@ final class Timer
         }
     }
 
-    /** @internal The wait is over: callback in its own Fiber; for setInterval, re-arm right away. */
+    /** @internal The wait is over: callback in its own Fiber; a repeating timer re-arms right away. */
     public function fire(): void
     {
         $this->op = 0;

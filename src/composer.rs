@@ -69,11 +69,7 @@ fn fetch(path: &std::path::Path) -> Result<(), String> {
         .map_err(|error| format!("{URL}: {error}"))?;
 
     let digest = ring::digest::digest(&ring::digest::SHA256, &phar);
-    let actual: String = digest
-        .as_ref()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let actual = crate::hex(digest.as_ref());
     let expected = checksum.split_whitespace().next().unwrap_or_default();
     if actual != expected {
         return Err(format!("{URL}: checksum {actual} is not {expected}"));

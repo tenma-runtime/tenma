@@ -146,7 +146,7 @@ async fn claim(key: &str, name: &str, version: i64) -> Result<Option<(i64, Strin
 async fn load_journal(key: &str) -> Result<(Vec<Entry>, i64), String> {
     let rows = sql(
         "query",
-        "SELECT seq, encode(entry, 'base64') AS entry FROM tenma_journal WHERE key = $1 ORDER BY seq",
+        "SELECT seq, encode(entry, 'hex') AS entry FROM tenma_journal WHERE key = $1 ORDER BY seq",
         json!([key]),
     )
     .await?;
@@ -155,7 +155,7 @@ async fn load_journal(key: &str) -> Result<(Vec<Entry>, i64), String> {
     for row in rows.as_array().into_iter().flatten() {
         next = row["seq"].as_i64().unwrap_or(next) + 1;
         let encoded = row["entry"].as_str().unwrap_or("");
-        let data = base64_decode(encoded);
+        let data = from_hex(encoded);
         if let Some((entry, _)) = journal::decode(&data, 0) {
             entries.push(entry);
         }
@@ -163,28 +163,11 @@ async fn load_journal(key: &str) -> Result<(Vec<Entry>, i64), String> {
     Ok((entries, next))
 }
 
-fn base64_decode(text: &str) -> Vec<u8> {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = Vec::with_capacity(text.len() * 3 / 4);
-    let mut buffer = 0u32;
-    let mut bits = 0;
-    for byte in text.bytes() {
-        let Some(value) = TABLE.iter().position(|&c| c == byte) else {
-            continue;
-        };
-        buffer = buffer << 6 | value as u32;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((buffer >> bits) as u8);
-            buffer &= (1 << bits) - 1;
-        }
-    }
-    out
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+fn from_hex(text: &str) -> Vec<u8> {
+    let digits = text.as_bytes().chunks_exact(2);
+    digits
+        .filter_map(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok())
+        .collect()
 }
 
 /// Appends entries to the journal of `key`, in order, as one statement.
@@ -196,7 +179,7 @@ async fn persist(key: &str, from: i64, entries: &[Entry]) -> Result<(), String> 
     let mut params = vec![json!(key)];
     for (index, entry) in entries.iter().enumerate() {
         params.push(json!(from + index as i64));
-        params.push(json!(format!("\\x{}", hex(&journal::encode(entry)))));
+        params.push(json!(format!("\\x{}", crate::hex(&journal::encode(entry)))));
         values.push(format!(
             "($1, ${}, ${}::bytea)",
             params.len() - 1,
@@ -590,7 +573,7 @@ async fn fire(timer: &Value) -> Result<(), String> {
             OpResult::Text(payload.as_bytes().to_vec())
         }),
     };
-    let encoded = format!("\\x{}", hex(&journal::encode(&entry)));
+    let encoded = format!("\\x{}", crate::hex(&journal::encode(&entry)));
     sql(
         "execute",
         "WITH timer AS ( \

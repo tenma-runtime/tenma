@@ -99,7 +99,7 @@ fn run(
         "rename" => match std::fs::rename(&target, &second) {
             // Like PHP rename(): across file systems, copy and then delete
             Err(error)
-                if error.raw_os_error() == Some(libc_exdev())
+                if error.raw_os_error() == Some(libc::EXDEV)
                     && std::fs::metadata(&target)?.is_file() =>
             {
                 std::fs::copy(&target, &second)?;
@@ -128,11 +128,6 @@ fn run(
             format!("unknown op {other}"),
         )),
     }
-}
-
-/// EXDEV: rename across file systems.
-const fn libc_exdev() -> i32 {
-    18
 }
 
 /// Starts a file system op. $second is the destination for rename and copy; $flag means recursive for
@@ -173,7 +168,7 @@ extern "C" fn tenma_rs_fs(
                 // tenma's own errors (e.g. copy onto itself) get EINVAL, as for invalid arguments
                 let code = error.raw_os_error().unwrap_or(
                     if error.kind() == io::ErrorKind::InvalidInput {
-                        22
+                        libc::EINVAL
                     } else {
                         0
                     },

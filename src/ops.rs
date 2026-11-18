@@ -64,7 +64,6 @@ extern "C" fn tenma_rs_op_cancel(op: u64) {
     }
 }
 
-/// Runs `run` with ops allowed: a worker's event loop.
 /// Is this thread's event loop running right now? Outside of it, no ops work.
 pub fn looping() -> bool {
     IN_LOOP.get()
@@ -76,6 +75,7 @@ extern "C" fn tenma_rs_looping() -> c_int {
     c_int::from(IN_LOOP.get())
 }
 
+/// Runs `run` with ops allowed: a worker's event loop.
 pub fn in_loop<T>(run: impl FnOnce() -> T) -> T {
     IN_LOOP.set(true);
     let result = run();
@@ -145,7 +145,12 @@ fn spawn_task(
         return 0;
     }
     let op = php::next_id();
-    let request = php::current_request();
+    // Only the journal asks which request an op belongs to
+    let request = if crate::journal::recording() {
+        php::current_request()
+    } else {
+        0
+    };
     // The task owns the guard from the start: even a task aborted before it ever ran cleans up
     // RUNNING
     let finished = Finished(op);

@@ -284,6 +284,11 @@ fn stubs() -> ExitCode {
     }
 }
 
+/// Bytes as lowercase hex.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 /// A PHP string literal in single quotes.
 fn php_string(text: &str) -> String {
     let escaped = text.replace('\\', "\\\\").replace('\'', "\\'");
@@ -1057,7 +1062,6 @@ fn spawn_worker(
     )
 }
 
-/// Ctrl+C or SIGTERM, as sent by Docker, systemd and Kubernetes to stop.
 /// `kill -HUP`, as after a renewal: the certificate files are read again.
 async fn reload_certificate_on_hangup() {
     let hangup = tokio::signal::unix::SignalKind::hangup();
@@ -1069,6 +1073,7 @@ async fn reload_certificate_on_hangup() {
     }
 }
 
+/// Ctrl+C or SIGTERM, as sent by Docker, systemd and Kubernetes to stop.
 async fn shutdown_signal() {
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .expect("cannot catch SIGTERM");
@@ -1156,7 +1161,7 @@ fn worker(
                     }
                 }
                 if options.replay.is_some() {
-                    status = replay_run(options);
+                    status = replay_run();
                     if inspect::replay_again() {
                         Stop::Restart
                     } else {
@@ -1377,7 +1382,7 @@ fn run_until_idle(
 
 /// A replay's event loop: the journal drives PHP until its end; with the debugger stepping back, the
 /// loop ends early and the worker starts over.
-fn replay_run(options: Options) -> u8 {
+fn replay_run() -> u8 {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -1396,7 +1401,7 @@ fn replay_run(options: Options) -> u8 {
     });
     drop(local);
     runtime.shutdown_timeout(Duration::from_millis(100));
-    if options.replay.is_none() { 1 } else { status }
+    status
 }
 
 /// Loads the standard library and the script (or the hooks of tenma.json) into this thread's PHP interpreter.
@@ -1459,7 +1464,6 @@ fn serve(
             php::request_exit(255);
             return Stop::Closed;
         }
-        // One worker per process fires the timers and signals of durable functions
         // One worker per process fires the timers and signals of durable functions, again after
         // every restart of its interpreter
         static CLAIMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

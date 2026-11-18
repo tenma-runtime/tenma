@@ -364,9 +364,7 @@ fn params(packed: &[u8]) -> Vec<TextParam> {
             continue;
         }
         let len = (len as usize).min(rest.len());
-        params.push(TextParam(Some(
-            String::from_utf8_lossy(&rest[..len]).into_owned(),
-        )));
+        params.push(TextParam(Some(rest[..len].to_vec())));
         rest = &rest[len..];
     }
     params
@@ -397,10 +395,16 @@ extern "C" fn tenma_rs_pdo(
     out: *mut PdoResult,
 ) -> u64 {
     let op = text(op, op_len);
-    let sql = text(sql, sql_len);
+    let sql = std::str::from_utf8(bytes(sql, sql_len)).map(str::to_owned);
     let params = params(bytes(packed, params_len));
-    let detail = format!("{op} {id} {}", crate::journal::redact(&sql));
-    let future = run(op, id, sql, params);
+    let detail = format!(
+        "{op} {id} {}",
+        crate::journal::redact(sql.as_deref().unwrap_or_default())
+    );
+    let future = async move {
+        let sql = sql.map_err(|_| "the statement is not valid UTF-8")?;
+        run(op, id, sql, params).await
+    };
     if blocking == 0 && ops::looping() {
         let (sender, receiver) = oneshot::channel::<Result<Vec<u8>, String>>();
         jobs()

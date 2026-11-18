@@ -4817,6 +4817,7 @@ fn pdo_pgsql_runs_on_tokio_postgres() {
         "{placeholders}"
     );
     assert_eq!(body(get(port, "/backslash")), "kept E'a\\\\b'\n");
+    assert_eq!(body(get(port, "/invalid-utf8")), "22021 HY000\n");
     assert_eq!(body(get(port, "/numbers")), "12 1.5 7|3 2.25 9\n");
     assert!(get(port, "/scroll").ends_with("5 3 2 UTF8\n"));
     let modifying = get(port, "/modifying-with");

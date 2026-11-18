@@ -121,15 +121,16 @@ pub fn clear() {
     REDIS.with_borrow_mut(HashMap::clear);
 }
 
-/// A parameter as text; the server decides the type, as with PDO.
+/// A parameter in text format, its bytes as PHP gave them: the server decides the type and rejects
+/// what is not valid in its encoding.
 #[derive(Debug)]
-pub struct TextParam(pub Option<String>);
+pub struct TextParam(pub Option<Vec<u8>>);
 
 impl ToSql for TextParam {
     fn to_sql(&self, _: &Type, out: &mut BytesMut) -> Result<IsNull, Failure> {
         match &self.0 {
             Some(text) => {
-                out.extend_from_slice(text.as_bytes());
+                out.extend_from_slice(text);
                 Ok(IsNull::No)
             }
             None => Ok(IsNull::Yes),

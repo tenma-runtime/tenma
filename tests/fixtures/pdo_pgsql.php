@@ -70,6 +70,18 @@ new Server((int) getenv('PORT'), function (Request $request) use ($connect) {
             $emulated->execute(['a' => "q'1", 'b' => 7]);
             $meta = $positional->getColumnMeta(1);
             return Response::json([$positional->fetch(PDO::FETCH_NUM), $emulated->fetch(PDO::FETCH_ASSOC), $meta['native_type'], $pdo->quote("it's")]);
+        case '/invalid-utf8':
+            // Bytes reach the server as they are: it rejects them instead of storing something else
+            $failures = [];
+            foreach ([['SELECT ?::text', ["caf\xe9"]], ["SELECT 'caf\xe9'", []]] as [$sql, $values]) {
+                try {
+                    $connect()->prepare($sql)->execute($values);
+                    $failures[] = 'no error';
+                } catch (PDOException $error) {
+                    $failures[] = $error->getCode();
+                }
+            }
+            return implode(' ', $failures) . "\n";
         case '/backslash':
             // With standard_conforming_strings off a plain '...' literal reads the backslash as an escape
             $pdo = $connect([PDO::ATTR_EMULATE_PREPARES => true]);

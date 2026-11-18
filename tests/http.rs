@@ -1658,7 +1658,10 @@ fn file_system_async() {
         .args(["-d", &allowed, "tests/fixtures/scripts/fs_basedir.php"])
         .output()
         .unwrap();
-    assert_eq!(String::from_utf8_lossy(&basedir.stdout), "forbidden\n");
+    assert_eq!(
+        String::from_utf8_lossy(&basedir.stdout),
+        "forbidden\nforbidden\n"
+    );
 }
 
 #[test]

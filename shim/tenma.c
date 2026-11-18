@@ -3418,8 +3418,7 @@ PHP_FUNCTION(tenma_op_fetch) {
     zend_string *method, *url, *body;
     zval *headers;
     zend_long timeout_ms;
-    char *path = "";
-    size_t path_len = 0;
+    zend_string *path = NULL;
     ZEND_PARSE_PARAMETERS_START(5, 6)
         Z_PARAM_STR(method)
         Z_PARAM_STR(url)
@@ -3427,15 +3426,23 @@ PHP_FUNCTION(tenma_op_fetch) {
         Z_PARAM_STR(body)
         Z_PARAM_LONG(timeout_ms)
         Z_PARAM_OPTIONAL
-        Z_PARAM_PATH(path, path_len)
+        Z_PARAM_PATH_STR(path)
     ZEND_PARSE_PARAMETERS_END();
+
+    char *target = NULL;
+    if (path != NULL && ZSTR_LEN(path) > 0 && !(target = resolve_path(path))) {
+        RETURN_THROWS();
+    }
 
     size_t packed_len;
     char *packed = pack_lines(Z_ARRVAL_P(headers), &packed_len);
     uint64_t op = tenma_rs_fetch(ZSTR_VAL(method), ZSTR_LEN(method), ZSTR_VAL(url), ZSTR_LEN(url),
         packed, packed_len, ZSTR_VAL(body), ZSTR_LEN(body), timeout_ms > 0 ? (uint64_t) timeout_ms : 1,
-        path, path_len);
+        target ? target : "", target ? strlen(target) : 0);
     free(packed);
+    if (target) {
+        efree(target);
+    }
     RETURN_LONG((zend_long) op);
 }
 

@@ -1662,6 +1662,15 @@ fn file_system_async() {
         String::from_utf8_lossy(&basedir.stdout),
         "forbidden\nforbidden\n"
     );
+    let limited = Command::new(env!("CARGO_BIN_EXE_tenma"))
+        .args([
+            "-d",
+            "memory_limit=16M",
+            "tests/fixtures/scripts/fs_memory.php",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&limited.stdout), "refused\n");
 }
 
 #[test]

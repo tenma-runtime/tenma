@@ -39,9 +39,16 @@ fn run(
     second: PathBuf,
     flag: bool,
     data: Vec<u8>,
+    room: usize,
 ) -> io::Result<OpResult> {
     match op {
-        "read" => std::fs::read(&target).map(OpResult::Text),
+        // Refused before Rust holds a file that PHP could not take under memory_limit
+        "read" => {
+            if std::fs::metadata(&target)?.len() > room as u64 {
+                return Err(io::Error::other("the file does not fit under memory_limit"));
+            }
+            std::fs::read(&target).map(OpResult::Text)
+        }
         "write" => std::fs::write(&target, data).map(|()| OpResult::Null),
         // One write call with O_APPEND: not in pieces that could mix with others
         "append" => {
@@ -149,6 +156,7 @@ extern "C" fn tenma_rs_fs(
     );
     let data = bytes(data, data_len).to_vec();
     let detail = format!("{op} {}", target.display());
+    let room = crate::php::memory_room();
     ops::spawn_uncancellable("fs", detail, async move {
         let label = if second.as_os_str().is_empty() {
             target.display().to_string()
@@ -157,7 +165,7 @@ extern "C" fn tenma_rs_fs(
         };
         let job = {
             let op = op.clone();
-            tokio::task::spawn_blocking(move || run(&op, target, second, flag, data))
+            tokio::task::spawn_blocking(move || run(&op, target, second, flag, data, room))
         };
         match job.await {
             Ok(Ok(result)) => result,

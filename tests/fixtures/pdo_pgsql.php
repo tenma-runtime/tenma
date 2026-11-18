@@ -70,6 +70,14 @@ new Server((int) getenv('PORT'), function (Request $request) use ($connect) {
             $emulated->execute(['a' => "q'1", 'b' => 7]);
             $meta = $positional->getColumnMeta(1);
             return Response::json([$positional->fetch(PDO::FETCH_NUM), $emulated->fetch(PDO::FETCH_ASSOC), $meta['native_type'], $pdo->quote("it's")]);
+        case '/backslash':
+            // With standard_conforming_strings off a plain '...' literal reads the backslash as an escape
+            $pdo = $connect([PDO::ATTR_EMULATE_PREPARES => true]);
+            $pdo->exec('SET standard_conforming_strings = off');
+            $hostile = "\\'; SELECT 'injected";
+            $statement = $pdo->prepare('SELECT :a AS a');
+            $statement->execute(['a' => $hostile]);
+            return ($statement->fetchColumn() === $hostile ? 'kept' : 'changed') . $pdo->quote('a\\b') . "\n";
         case '/numbers':
             // Numbers sit in the packed result buffer right before the next value's length: a 50-byte text after an
             // int, a 53-byte text after a float, and a 52-byte text at the start of the next row must not add digits

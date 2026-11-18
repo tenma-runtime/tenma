@@ -1649,16 +1649,20 @@ static zend_string *pg_handle_quoter(pdo_dbh_t *dbh, const zend_string *unquoted
         smart_str_0(&quoted);
         return quoted.s;
     }
-    // ponytail: standard_conforming_strings is on since Postgres 9.1, so only the quote needs doubling;
-    // a server with it off would read backslashes as escapes
     if (memchr(ZSTR_VAL(unquoted), '\0', ZSTR_LEN(unquoted)) != NULL) {
         return NULL;
+    }
+    // A backslash is literal only while standard_conforming_strings is on; the E'' form with doubled
+    // backslashes reads the same under both settings. The space keeps the E apart from a preceding token.
+    bool has_backslash = memchr(ZSTR_VAL(unquoted), '\\', ZSTR_LEN(unquoted)) != NULL;
+    if (has_backslash) {
+        smart_str_appendl(&quoted, " E", 2);
     }
     smart_str_appendc(&quoted, '\'');
     for (size_t i = 0; i < ZSTR_LEN(unquoted); i++) {
         char c = ZSTR_VAL(unquoted)[i];
-        if (c == '\'') {
-            smart_str_appendc(&quoted, '\'');
+        if (c == '\'' || c == '\\') {
+            smart_str_appendc(&quoted, c);
         }
         smart_str_appendc(&quoted, c);
     }

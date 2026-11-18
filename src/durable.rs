@@ -22,6 +22,7 @@ use crate::php::{self, OpResult, bytes};
 const LEASE: &str = "30 seconds";
 const RENEW: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_secs(1);
+const LEASE_LOST: &str = "the lease expired and another worker took the function over";
 
 static URL: OnceLock<String> = OnceLock::new();
 
@@ -99,7 +100,7 @@ CREATE TABLE IF NOT EXISTS tenma_durable (
 CREATE TABLE IF NOT EXISTS tenma_journal (
     key text NOT NULL, seq int NOT NULL, entry bytea NOT NULL, PRIMARY KEY (key, seq));
 CREATE TABLE IF NOT EXISTS tenma_timers (
-    key text PRIMARY KEY, due timestamptz NOT NULL, signal text, payload text, fired bool NOT NULL DEFAULT false);
+    key text PRIMARY KEY, due timestamptz NOT NULL, signal text, payload text);
 CREATE INDEX IF NOT EXISTS tenma_timers_due ON tenma_timers (due);
 CREATE TABLE IF NOT EXISTS tenma_signals (
     signal text PRIMARY KEY, payload text NOT NULL, sent timestamptz NOT NULL DEFAULT now());
@@ -241,8 +242,8 @@ async fn start(key: String, name: String, version: i64) -> Result<String, String
                 tokio::time::sleep(RENEW).await;
                 let _ = sql(
                     "execute",
-                    &format!("UPDATE tenma_durable SET lease_until = now() + interval '{LEASE}' WHERE key = $1"),
-                    json!([key]),
+                    &format!("UPDATE tenma_durable SET lease_until = now() + interval '{LEASE}' WHERE key = $1 AND owner = $2"),
+                    json!([key, owner()]),
                 )
                 .await;
             }
@@ -276,12 +277,20 @@ async fn finish(key: String, error: Option<String>) -> Result<(), String> {
         drop(run);
         persist(&key, next, &pending).await?;
     }
-    sql(
+    let status = if error.is_some() {
+        "failed"
+    } else {
+        "completed"
+    };
+    let finished = sql(
         "execute",
-        "UPDATE tenma_durable SET status = $2, error = $3, lease_until = NULL, updated = now() WHERE key = $1",
-        json!([key, if error.is_some() { "failed" } else { "completed" }, error]),
+        "UPDATE tenma_durable SET status = $2, error = $3, lease_until = NULL, updated = now() WHERE key = $1 AND owner = $4",
+        json!([key, status, error, owner()]),
     )
     .await?;
+    if finished.as_i64() == Some(0) {
+        return Err(LEASE_LOST.into());
+    }
     Ok(())
 }
 
@@ -323,7 +332,7 @@ async fn wait(key: String, what: String, due: f64) -> Result<OpResult, String> {
     // in between went to one of the two, never past both
     sql(
         "execute",
-        "INSERT INTO tenma_timers (key, due, signal) VALUES ($1, to_timestamp($2), $3) ON CONFLICT (key) DO UPDATE SET due = EXCLUDED.due, signal = EXCLUDED.signal, payload = NULL, fired = false",
+        "INSERT INTO tenma_timers (key, due, signal) VALUES ($1, to_timestamp($2), $3) ON CONFLICT (key) DO UPDATE SET due = EXCLUDED.due, signal = EXCLUDED.signal, payload = NULL",
         json!([key, due, signal]),
     )
     .await?;
@@ -341,11 +350,11 @@ async fn wait(key: String, what: String, due: f64) -> Result<OpResult, String> {
         {
             let deleted = sql(
                 "execute",
-                "DELETE FROM tenma_timers WHERE key = $1 AND fired = false",
+                "DELETE FROM tenma_timers WHERE key = $1 AND payload IS NULL",
                 json!([key]),
             )
             .await?;
-            // Fired meanwhile by a send() that hit the timer row: the poller delivers that one
+            // Hit meanwhile by a send(): the poller delivers that one
             if deleted.as_i64().unwrap_or(0) == 1 {
                 let result = OpResult::Text(payload.as_bytes().to_vec());
                 append(&run, &key, "durable.wait", &detail, &result).await?;
@@ -353,10 +362,12 @@ async fn wait(key: String, what: String, due: f64) -> Result<OpResult, String> {
             }
         }
     }
+    // The poller may have fired the timer already: then the function stays 'running' and is resumed
     sql(
         "execute",
-        "UPDATE tenma_durable SET status = 'waiting', lease_until = NULL, updated = now() WHERE key = $1",
-        json!([key]),
+        "UPDATE tenma_durable SET status = CASE WHEN EXISTS (SELECT 1 FROM tenma_timers WHERE key = $1) THEN 'waiting' ELSE 'running' END, \
+         lease_until = NULL, updated = now() WHERE key = $1 AND owner = $2",
+        json!([key, owner()]),
     )
     .await?;
     if let Some(run) = RUNS.with_borrow_mut(|runs| runs.remove(&key))
@@ -397,7 +408,7 @@ async fn send(signal: String, payload: String) -> Result<(), String> {
     ensure_schema().await?;
     let woken = sql(
         "execute",
-        "UPDATE tenma_timers SET due = now(), payload = $2 WHERE signal = $1 AND fired = false AND payload IS NULL",
+        "UPDATE tenma_timers SET due = now(), payload = $2 WHERE signal = $1 AND payload IS NULL",
         json!([signal, payload]),
     )
     .await?;
@@ -563,6 +574,42 @@ unsafe extern "C" {
     ) -> std::ffi::c_int;
 }
 
+/// Fires one due timer in a single statement: the wait's result joins the journal, the timer row goes
+/// and the function is 'running' again, or nothing of that happens. A timer that another poller took
+/// or that a send() changed since it was read matches no row.
+async fn fire(timer: &Value) -> Result<(), String> {
+    let key = timer["key"].as_str().unwrap_or_default();
+    let signal = timer["signal"].as_str();
+    let payload = timer["payload"].as_str();
+    let entry = Entry::Op {
+        op: 0,
+        request: 0,
+        kind: "durable.wait".into(),
+        detail: signal.map_or("timer".to_owned(), |signal| format!("signal:{signal}")),
+        result: payload.map_or(OpResult::Null, |payload| {
+            OpResult::Text(payload.as_bytes().to_vec())
+        }),
+    };
+    let encoded = format!("\\x{}", hex(&journal::encode(&entry)));
+    sql(
+        "execute",
+        "WITH timer AS ( \
+             DELETE FROM tenma_timers \
+             WHERE key = $1 AND due <= now() AND payload IS NOT DISTINCT FROM $3::text \
+             RETURNING key \
+         ), entry AS ( \
+             INSERT INTO tenma_journal (key, seq, entry) \
+             SELECT key, (SELECT coalesce(max(seq), -1) + 1 FROM tenma_journal WHERE key = $1), $2::bytea \
+             FROM timer \
+         ) \
+         UPDATE tenma_durable SET status = 'running', updated = now() \
+         WHERE key IN (SELECT key FROM timer) AND status = 'waiting'",
+        json!([key, encoded, payload]),
+    )
+    .await?;
+    Ok(())
+}
+
 /// The first worker's poller: fires due timers and signals, resumes functions whose process died.
 pub async fn poll() {
     loop {
@@ -572,52 +619,18 @@ pub async fn poll() {
         }
         let due = sql(
             "query",
-            "UPDATE tenma_timers SET fired = true WHERE due <= now() AND fired = false RETURNING key, signal, payload",
+            "SELECT key, signal, payload FROM tenma_timers WHERE due <= now()",
             json!([]),
         )
         .await;
-        let Ok(due) = due else {
-            continue;
-        };
-        for timer in due.as_array().into_iter().flatten() {
-            let key = timer["key"].as_str().unwrap_or_default().to_owned();
-            let detail = timer["signal"]
-                .as_str()
-                .map_or("timer".to_owned(), |signal| format!("signal:{signal}"));
-            let result = timer["payload"].as_str().map_or(OpResult::Null, |payload| {
-                OpResult::Text(payload.as_bytes().to_vec())
-            });
-            let next = sql(
-                "query",
-                "SELECT coalesce(max(seq), -1) + 1 AS next FROM tenma_journal WHERE key = $1",
-                json!([key]),
-            )
-            .await
+        for timer in due
             .ok()
-            .and_then(|rows| rows[0]["next"].as_i64())
-            .unwrap_or(0);
-            let entry = Entry::Op {
-                op: 0,
-                request: 0,
-                kind: "durable.wait".into(),
-                detail,
-                result,
-            };
-            if persist(&key, next, &[entry]).await.is_err() {
-                continue;
-            }
-            let _ = sql(
-                "execute",
-                "DELETE FROM tenma_timers WHERE key = $1",
-                json!([key]),
-            )
-            .await;
-            let _ = sql(
-                "execute",
-                "UPDATE tenma_durable SET status = 'running', updated = now() WHERE key = $1 AND status = 'waiting'",
-                json!([key]),
-            )
-            .await;
+            .as_ref()
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let _ = fire(timer).await;
         }
         // Functions to run: woken ones, and those whose owner died while they ran
         let stale = sql(

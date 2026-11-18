@@ -76,7 +76,8 @@ final class Postgres
     }
 
     /**
-     * Runs $work in a transaction: commit if $work completes, otherwise rollback.
+     * Runs $work in a transaction: commit if $work completes, otherwise rollback. A transaction cannot
+     * open another one: that throws a LogicException.
      *
      * @template T
      * @param callable(self): T $work
@@ -84,6 +85,9 @@ final class Postgres
      */
     public function transaction(callable $work): mixed
     {
+        if (str_starts_with($this->target, 'tx:')) {
+            throw new \LogicException('Postgres::transaction(): already inside a transaction');
+        }
         $id = ++self::$transactions;
         $transaction = new self("tx:$id");
         try {

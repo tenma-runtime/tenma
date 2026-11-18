@@ -24,6 +24,14 @@ $table = 'tenma_test_' . getmypid();
             }
             return $db->first("SELECT count(*) AS n FROM $table WHERE name = 'discarded'");
         })(),
+        '/transaction-in-transaction' => $db->transaction(function (Postgres $tx) {
+            try {
+                $tx->transaction(fn () => null);
+            } catch (LogicException $error) {
+                // The outer transaction is still usable
+                return $tx->first('SELECT $1::text AS said', [$error->getMessage()]);
+            }
+        }),
         '/commit' => $db->transaction(fn (Postgres $tx) => $tx->execute("UPDATE $table SET amount = amount + 1")),
         // Several statements in one call run as one: the failing second one takes the first with it
         '/script-fails' => (function () use ($db, $table) {

@@ -111,7 +111,8 @@ For statements without a result; returns the number of affected rows.
 public function transaction(callable $work): mixed
 ```
 
-Runs $work in a transaction: commit if $work completes, otherwise rollback.
+Runs $work in a transaction: commit if $work completes, otherwise rollback. A transaction cannot
+open another one: that throws a LogicException.
 
 **Parameters**
 

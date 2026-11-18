@@ -939,6 +939,8 @@ fn postgres_and_redis_async() {
     assert!(get(port, "/list").contains(r#""name": "first""#));
     assert!(get(port, "/rollback").contains(r#""n": 0"#));
     assert!(get(port, "/commit").ends_with("1\n"));
+    let nested = get(port, "/transaction-in-transaction");
+    assert!(nested.contains("already inside a transaction"), "{nested}");
     assert!(get(port, "/script").contains(r#""n": 3"#));
     let modifying = get(port, "/modifying-with");
     assert!(

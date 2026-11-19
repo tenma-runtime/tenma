@@ -70,7 +70,7 @@ typedef struct {
     void (*call_async)(const char *fn, size_t fn_len, const uint8_t *in, size_t in_len, TenmaToken *token);
     /* A PHP handler handed this WebSocket over; the plugin may send on it from now on. May be NULL: adopt() then fails. */
     void (*adopt)(uint64_t conn);
-    /* An incoming message on an adopted connection, on tenma's socket task: return quickly. */
+    /* An incoming message on an adopted connection, on tenma's I/O thread: return quickly. */
     void (*message)(uint64_t conn, const uint8_t *ptr, size_t len, int binary);
     /* The client or tenma closed an adopted connection. */
     void (*closed)(uint64_t conn);

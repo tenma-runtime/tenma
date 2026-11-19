@@ -250,6 +250,7 @@ fn main() -> ExitCode {
     }
     let status = run(&argv, options);
     // Here and not in run(): a script without servers and a failed start end there early
+    streams::stop_io_thread();
     plugins::shutdown();
     php::stop();
     ExitCode::from(status)
@@ -1799,13 +1800,20 @@ impl Drop for Open {
 
 /// A connection whose writes may stall at most $limit: a client that stops reading is disconnected
 /// instead of holding its task, its buffers and a stream writer that waits for room forever.
-struct WriteTimeout<S> {
+pub(crate) struct WriteTimeout<S> {
     stream: S,
     limit: Duration,
     stalled: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
 }
 
 impl<S> WriteTimeout<S> {
+    /// The stream, to move it to another loop. A running clock belongs to the loop before and
+    /// goes; the next stalled write starts one on the new loop.
+    pub(crate) fn moved(&mut self) -> &mut S {
+        self.stalled = None;
+        &mut self.stream
+    }
+
     fn new(stream: S, limit: Duration) -> Self {
         Self {
             stream,

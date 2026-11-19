@@ -51,6 +51,15 @@ new Server((int) getenv('PORT'), function (Request $request) use (&$events) {
                 // Handed over: the handler returns, the plugin keeps the connection
                 Plugin::adopt('echo', $socket);
             });
+        case '/busy':
+            // Computes instead of waiting: the worker hears nothing meanwhile
+            $until = microtime(true) + 0.5;
+            while (microtime(true) < $until) {
+            }
+            return "done\n";
+        case '/fatal':
+            // More than memory_limit: a fatal error, the interpreter starts anew
+            return str_repeat('x', 512 * 1024 * 1024);
         case '/events':
             return Response::json($events);
     }

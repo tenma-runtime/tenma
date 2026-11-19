@@ -6,23 +6,27 @@ use std::collections::HashMap;
 use std::ffi::c_int;
 use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use hyper::body::{Body, Frame};
-use hyper::upgrade::OnUpgrade;
+use hyper::upgrade::{OnUpgrade, Upgraded};
 use hyper_util::rt::TokioIo;
-use tokio::sync::mpsc;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::net::TcpStream;
+use tokio::sync::{Notify, mpsc, oneshot};
+use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, Role, WebSocketConfig};
 
-use crate::ops;
 use crate::php::{self, OpResult, Reply, bytes};
+use crate::plugins::Adopter;
+use crate::{WriteTimeout, ops};
 
 /// This many chunks may wait for a slow client, then the fiber waits when writing.
 const STREAM_BUFFER: usize = 16;
@@ -105,6 +109,8 @@ pub struct Pipes {
     unread: Rc<Cell<usize>>,
     /// Bytes of outgoing messages queued and not yet written, for a plugin's back pressure.
     queued: Arc<AtomicUsize>,
+    /// The plugin that adopts the socket, if one ever does.
+    adopter: oneshot::Receiver<Adopter>,
     gone: Gone,
 }
 
@@ -133,23 +139,39 @@ struct Socket {
     incoming: Rc<RefCell<Option<mpsc::Receiver<(Vec<u8>, bool)>>>>,
     unread: Rc<Cell<usize>>,
     queued: Arc<AtomicUsize>,
+    /// Tells the socket's task which plugin adopted it.
+    adopter: oneshot::Sender<Adopter>,
 }
 
-/// A plugin adopts the WebSocket of request `rid`: PHP loses it, the plugin gets the writing end, the
-/// incoming messages and the queued-bytes counter. None if the request has no socket, or receive()
-/// is running on it.
-pub fn take_socket(
-    rid: u64,
-) -> Option<(
-    mpsc::Sender<Message>,
-    mpsc::Receiver<(Vec<u8>, bool)>,
-    Arc<AtomicUsize>,
-    Rc<Cell<usize>>,
-)> {
+/// What a plugin gets of a WebSocket it adopts.
+pub struct Taken {
+    /// The writing end, and the bytes queued on it.
+    pub outgoing: mpsc::Sender<Message>,
+    pub queued: Arc<AtomicUsize>,
+    /// The messages that came while the socket was PHP's.
+    pub unread: Vec<(Vec<u8>, bool)>,
+    /// Hands the reading over: from then on the socket's task tells the plugin every message itself.
+    pub adopter: oneshot::Sender<Adopter>,
+}
+
+/// A plugin adopts the WebSocket of request `rid`: PHP loses it. None if the request has no socket,
+/// or receive() is running on it.
+pub fn take_socket(rid: u64) -> Option<Taken> {
     let socket = SOCKETS.with_borrow_mut(|sockets| sockets.remove(&rid))?;
     let receiver = socket.incoming.borrow_mut().take();
     match receiver {
-        Some(receiver) => Some((socket.outgoing, receiver, socket.queued, socket.unread)),
+        Some(mut receiver) => {
+            let mut unread = Vec::new();
+            while let Ok(message) = receiver.try_recv() {
+                unread.push(message);
+            }
+            Some(Taken {
+                outgoing: socket.outgoing,
+                queued: socket.queued,
+                unread,
+                adopter: socket.adopter,
+            })
+        }
         None => {
             SOCKETS.with_borrow_mut(|sockets| sockets.insert(rid, socket));
             None
@@ -251,6 +273,7 @@ extern "C" fn tenma_rs_ws_accept(rid: u64) -> c_int {
     let (incoming_sender, incoming) = mpsc::channel(SOCKET_BACKLOG);
     let unread = Rc::new(Cell::new(0));
     let queued = Arc::new(AtomicUsize::new(0));
+    let (adopter, adopter_receiver) = oneshot::channel();
     if !php::reply(
         rid,
         Reply::Upgrade(Pipes {
@@ -258,6 +281,7 @@ extern "C" fn tenma_rs_ws_accept(rid: u64) -> c_int {
             incoming: incoming_sender,
             unread: Rc::clone(&unread),
             queued: Arc::clone(&queued),
+            adopter: adopter_receiver,
             gone: Gone(rid),
         }),
     ) {
@@ -268,6 +292,7 @@ extern "C" fn tenma_rs_ws_accept(rid: u64) -> c_int {
         incoming: Rc::new(RefCell::new(Some(incoming))),
         unread,
         queued,
+        adopter,
     };
     SOCKETS.with_borrow_mut(|sockets| sockets.insert(rid, socket));
     1
@@ -360,14 +385,149 @@ extern "C" fn tenma_rs_ws_close(rid: u64, finished: c_int) {
     }
 }
 
-/// After the 101 response: pass messages between client and PHP until one side closes.
+/// The connection under a WebSocket. A plain or TLS connection can move to the I/O thread; one of a
+/// kind this code does not know stays on the loop of its worker.
+enum Carrier {
+    Plain(WriteTimeout<TcpStream>),
+    Tls(Box<WriteTimeout<TlsStream<TcpStream>>>),
+    Other(TokioIo<Upgraded>),
+}
+
+impl Carrier {
+    /// The connection hyper gave up, and what hyper had read of it beyond the request.
+    fn of(upgraded: Upgraded) -> (Self, Bytes) {
+        let upgraded = match upgraded.downcast::<TokioIo<WriteTimeout<TcpStream>>>() {
+            Ok(parts) => return (Self::Plain(parts.io.into_inner()), parts.read_buf),
+            Err(upgraded) => upgraded,
+        };
+        match upgraded.downcast::<TokioIo<WriteTimeout<TlsStream<TcpStream>>>>() {
+            Ok(parts) => (Self::Tls(Box::new(parts.io.into_inner())), parts.read_buf),
+            Err(upgraded) => (Self::Other(TokioIo::new(upgraded)), Bytes::new()),
+        }
+    }
+
+    /// Moves the connection to another loop: from then on that loop hears when the client sent
+    /// something or takes more, whatever the loop before is busy with. False: it stays where it is.
+    fn move_to(&mut self, runtime: &tokio::runtime::Handle) -> bool {
+        let stream = match self {
+            Self::Plain(stream) => stream.moved(),
+            Self::Tls(stream) => stream.moved().get_mut().0,
+            Self::Other(_) => return false,
+        };
+        // A second descriptor of the same connection, known to the other loop; the first one goes
+        let Ok(copy) = std::os::fd::AsFd::as_fd(stream).try_clone_to_owned() else {
+            return false;
+        };
+        let _there = runtime.enter();
+        match TcpStream::from_std(copy.into()) {
+            Ok(moved) => {
+                *stream = moved;
+                true
+            }
+            Err(_) => false,
+        }
+    }
+}
+
+impl AsyncRead for Carrier {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Plain(stream) => Pin::new(stream).poll_read(context, buffer),
+            Self::Tls(stream) => Pin::new(&mut **stream).poll_read(context, buffer),
+            Self::Other(stream) => Pin::new(stream).poll_read(context, buffer),
+        }
+    }
+}
+
+impl AsyncWrite for Carrier {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        data: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            Self::Plain(stream) => Pin::new(stream).poll_write(context, data),
+            Self::Tls(stream) => Pin::new(&mut **stream).poll_write(context, data),
+            Self::Other(stream) => Pin::new(stream).poll_write(context, data),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Plain(stream) => Pin::new(stream).poll_flush(context),
+            Self::Tls(stream) => Pin::new(&mut **stream).poll_flush(context),
+            Self::Other(stream) => Pin::new(stream).poll_flush(context),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Plain(stream) => Pin::new(stream).poll_shutdown(context),
+            Self::Tls(stream) => Pin::new(&mut **stream).poll_shutdown(context),
+            Self::Other(stream) => Pin::new(stream).poll_shutdown(context),
+        }
+    }
+}
+
+/// The I/O thread: a loop of its own for the WebSockets plugins adopted, so a worker busy in PHP
+/// holds up neither their reads nor their writes, and a worker that restarts does not end them.
+struct IoThread {
+    runtime: tokio::runtime::Handle,
+    stop: Arc<Notify>,
+    thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+static IO_THREAD: OnceLock<IoThread> = OnceLock::new();
+
+/// The loop of the I/O thread, started with the first adopted socket.
+fn io_thread() -> &'static tokio::runtime::Handle {
+    let started = IO_THREAD.get_or_init(|| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio does not start");
+        let handle = runtime.handle().clone();
+        let stop = Arc::new(Notify::new());
+        let stopped = Arc::clone(&stop);
+        let thread = std::thread::Builder::new()
+            .name("tenma-io".into())
+            .spawn(move || runtime.block_on(stopped.notified()))
+            .expect("the I/O thread does not start");
+        IoThread {
+            runtime: handle,
+            stop,
+            thread: Mutex::new(Some(thread)),
+        }
+    });
+    &started.runtime
+}
+
+/// tenma stops: the adopted sockets on the I/O thread end, and each plugin has heard closed() for
+/// its connections when this returns.
+pub fn stop_io_thread() {
+    let Some(started) = IO_THREAD.get() else {
+        return;
+    };
+    started.stop.notify_one();
+    if let Some(thread) = started.thread.lock().unwrap().take() {
+        let _ = thread.join();
+    }
+}
+
+/// After the 101 response: pass messages between client and PHP until one side closes, or a plugin
+/// adopts the socket and its messages go there.
 pub async fn run_websocket(upgrade: OnUpgrade, pipes: Pipes) {
     let Pipes {
         mut outgoing,
         incoming,
         unread,
         queued,
-        gone: _gone,
+        adopter,
+        gone,
     } = pipes;
     let Ok(upgraded) = upgrade.await else {
         return;
@@ -376,40 +536,98 @@ pub async fn run_websocket(upgrade: OnUpgrade, pipes: Pipes) {
     let config = WebSocketConfig::default()
         .max_message_size(Some(limit))
         .max_frame_size(Some(limit));
-    let socket =
-        WebSocketStream::from_raw_socket(TokioIo::new(upgraded), Role::Server, Some(config)).await;
-    let (mut sink, mut stream) = socket.split();
-    loop {
+    let (carrier, read) = Carrier::of(upgraded);
+    let mut socket =
+        WebSocketStream::from_partially_read(carrier, read.into(), Role::Server, Some(config))
+            .await;
+    // Without a plugin the sender goes with PHP's side of the socket; that is not asked twice
+    let mut adopter = futures_util::FutureExt::fuse(adopter);
+    let plugin = loop {
         tokio::select! {
-            message = stream.next() => match message {
+            // First: once a plugin adopted the socket nobody reads what would still go to PHP
+            biased;
+            adopter = &mut adopter => {
+                if let Ok(plugin) = adopter {
+                    break plugin;
+                }
+            }
+            message = socket.next() => match message {
                 Some(Ok(Message::Text(text))) => {
-                    if !accept_message(&incoming, &unread, limit, (text.as_bytes().to_vec(), false), &mut sink).await {
-                        break;
+                    let message = (text.as_bytes().to_vec(), false);
+                    if !accept_message(&incoming, &unread, limit, message, &mut socket).await {
+                        return;
                     }
                 }
                 Some(Ok(Message::Binary(data))) => {
-                    if !accept_message(&incoming, &unread, limit, (data.to_vec(), true), &mut sink).await {
-                        break;
+                    let message = (data.to_vec(), true);
+                    if !accept_message(&incoming, &unread, limit, message, &mut socket).await {
+                        return;
                     }
                 }
                 Some(Ok(_)) => {}
+                Some(Err(_)) | None => return,
+            },
+            message = outgoing.recv() => {
+                if !write_message(&mut socket, &queued, message).await {
+                    return;
+                }
+            }
+        }
+    };
+
+    // PHP's side of the socket is gone already; what is left of it ends here, on its worker
+    drop((incoming, unread, gone));
+    let runtime = io_thread();
+    let moved = socket.get_mut().move_to(runtime);
+    let serving = serve_plugin(socket, outgoing, queued, plugin);
+    if moved {
+        runtime.spawn(serving);
+    } else {
+        serving.await;
+    }
+}
+
+/// An adopted socket: its messages go straight to the plugin, what the plugin queued goes out.
+async fn serve_plugin(
+    mut socket: WebSocketStream<Carrier>,
+    mut outgoing: mpsc::Receiver<Message>,
+    queued: Arc<AtomicUsize>,
+    plugin: Adopter,
+) {
+    loop {
+        tokio::select! {
+            message = socket.next() => match message {
+                Some(Ok(Message::Text(text))) => plugin.message(text.as_bytes(), false),
+                Some(Ok(Message::Binary(data))) => plugin.message(&data, true),
+                Some(Ok(_)) => {}
                 Some(Err(_)) | None => break,
             },
-            message = outgoing.recv() => match message {
-                Some(message) => {
-                    let size = message.len();
-                    if sink.send(message).await.is_err() {
-                        break;
-                    }
-                    queued.fetch_sub(size.min(queued.load(Ordering::Relaxed)), Ordering::Relaxed);
-                }
-                None => {
-                    let _ = sink.close().await;
+            message = outgoing.recv() => {
+                if !write_message(&mut socket, &queued, message).await {
                     break;
                 }
-            },
+            }
         }
     }
+}
+
+/// Writes a queued message to the client, or closes once nothing more can come. False means: end
+/// the connection.
+async fn write_message(
+    socket: &mut WebSocketStream<Carrier>,
+    queued: &AtomicUsize,
+    message: Option<Message>,
+) -> bool {
+    let Some(message) = message else {
+        let _ = socket.close(None).await;
+        return false;
+    };
+    let size = message.len();
+    if socket.send(message).await.is_err() {
+        return false;
+    }
+    queued.fetch_sub(size.min(queued.load(Ordering::Relaxed)), Ordering::Relaxed);
+    true
 }
 
 /// Passes a message on to PHP. If PHP does not keep reading, the backlog does not grow without end:

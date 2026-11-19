@@ -5373,14 +5373,31 @@ fn native_plugins_answer_calls_adopt_sockets_and_shut_down() {
         socket.send(Message::binary(vec![7; 400])).unwrap();
         assert_eq!(socket.read().unwrap(), Message::binary(vec![7; 400]));
     }
+    // The socket lives on the I/O thread: the plugin answers while the worker computes in PHP
+    let busy = std::thread::spawn(move || body(get(port, "/busy")));
+    std::thread::sleep(Duration::from_millis(100));
+    let asked = Instant::now();
+    socket.send(Message::text("ping")).unwrap();
+    assert_eq!(socket.read().unwrap(), Message::text("ping"));
+    assert!(
+        asked.elapsed() < Duration::from_millis(200),
+        "{:?}",
+        asked.elapsed()
+    );
+    assert_eq!(busy.join().unwrap(), "done\n");
+    // And it outlives the interpreter of its worker, which starts anew after a fatal error and has
+    // heard nothing yet
+    assert!(body(get(port, "/events")).contains("adopted "));
+    get(port, "/fatal");
+    assert_eq!(body(get(port, "/events")).trim(), "[]");
+    assert_eq!(body(get(port, "/call?text=again")), "AGAIN\n");
+    socket.send(Message::text("ping")).unwrap();
+    assert_eq!(socket.read().unwrap(), Message::text("ping"));
     socket.send(Message::text("bye")).unwrap();
     assert!(matches!(socket.read(), Ok(Message::Close(_)) | Err(_)));
     std::thread::sleep(Duration::from_millis(200));
     let events = body(get(port, "/events"));
-    assert!(
-        events.contains("adopted ") && events.contains("closed "),
-        "{events}"
-    );
+    assert!(events.contains("closed "), "{events}");
 
     // SIGTERM: the PHP stop handler runs, then the plugin's shutdown; the subscription that is still
     // open does not hold the stop up until --stop-timeout
@@ -5405,6 +5422,51 @@ fn native_plugins_answer_calls_adopt_sockets_and_shut_down() {
         .read_to_string(&mut stderr)
         .unwrap();
     assert!(stderr.contains("plugin echo loaded from"), "{stderr}");
+}
+
+#[test]
+fn an_adopted_socket_over_tls_answers_while_its_worker_is_busy() {
+    let port = 18_232;
+    let plugin = echo_plugin();
+    let directory = scratch("plugin-tls");
+    let _server = Server(
+        Command::new(env!("CARGO_BIN_EXE_tenma"))
+            .args([
+                "--plugin",
+                plugin.to_str().unwrap(),
+                "--tls-cert",
+                "tests/fixtures/tls/cert.pem",
+                "--tls-key",
+                "tests/fixtures/tls/key.pem",
+                "tests/fixtures/plugin.php",
+            ])
+            .env("PORT", port.to_string())
+            .env("ECHO_SHUTDOWN_FILE", directory.join("shutdown.log"))
+            .spawn()
+            .unwrap(),
+    );
+    assert!(get_tls(port, "/call?text=hello").ends_with("HELLO\n"));
+
+    use tokio_tungstenite::tungstenite::Message;
+    let address = format!("wss://localhost:{port}/ws");
+    let (mut socket, _) =
+        tokio_tungstenite::tungstenite::client(address, tls_connect(port)).unwrap();
+    assert_eq!(socket.read().unwrap(), Message::text("hello from php"));
+    assert_eq!(
+        socket.read().unwrap(),
+        Message::text("hello from the plugin")
+    );
+    let busy = std::thread::spawn(move || get_tls(port, "/busy"));
+    std::thread::sleep(Duration::from_millis(100));
+    let asked = Instant::now();
+    socket.send(Message::text("ping")).unwrap();
+    assert_eq!(socket.read().unwrap(), Message::text("ping"));
+    assert!(
+        asked.elapsed() < Duration::from_millis(200),
+        "{:?}",
+        asked.elapsed()
+    );
+    assert!(busy.join().unwrap().ends_with("done\n"));
 }
 
 #[test]

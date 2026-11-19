@@ -87,7 +87,7 @@ message. Memory crosses the boundary only as pointer and length, valid for the d
 | `call(fn, len, in, len, out)`         | on the worker thread, synchronous; 0 on success, otherwise the reply is the error    |
 | `call_async(fn, len, in, len, token)` | on the worker thread; returns at once and completes the token later from any thread  |
 | `adopt(conn)`                         | a PHP handler handed this connection over                                            |
-| `message(conn, ptr, len, binary)`     | an incoming message on an adopted connection, on tenma's socket task: return quickly |
+| `message(conn, ptr, len, binary)`     | an incoming message on an adopted connection, on tenma's I/O thread: return quickly  |
 | `closed(conn)`                        | the client or tenma closed an adopted connection                                     |
 | `shutdown()`                          | once, when tenma stops, after PHP has run its stop handlers                          |
 
@@ -110,9 +110,12 @@ that fails.
 ## Behaviour
 
 - Every plugin name is unique; the same library given twice loads once.
-- An adopted socket's task still runs on its worker's loop: a worker busy in PHP delays the reads of
-  its adopted sockets, writes are unaffected. A worker restart after a fatal error ends the
-  connections of that worker, adopted ones included.
+- Adopted sockets live on a thread of their own, the I/O thread: a worker busy in PHP holds up
+  neither their reads nor their writes, and they outlive a restart of its interpreter. `message()`
+  and `closed()` come on that thread, one at a time for all connections; messages that arrived
+  before the hand-over come first, on the worker. When tenma stops, the plugin hears `closed()` for
+  every connection it still has, then `shutdown()`.
+- An adopted socket no longer counts for `--max-connections`: how many a plugin keeps is up to it.
 - `send()` reports `TENMA_FULL` once 256 messages wait for the client; the plugin decides whether to
   drop or retry. `buffered()` counts the bytes of those messages.
 - `post()` is unbounded, like `Channel::publish()` within a process: send events, not snapshots.

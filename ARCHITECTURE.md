@@ -148,5 +148,3 @@ Measured on an M-series Mac with `ab`.
 - Streaming large request bodies. Up to `--max-body` they are held in memory.
 - A timeout for handlers that compute instead of wait. An endless loop holds up its worker.
 - Several accepting threads (`SO_REUSEPORT`) for many short connections without keep-alive.
-- A dedicated I/O thread for the WebSockets a native plugin adopted: their reads wait while their
-  worker is busy in PHP, and a worker restart ends them.

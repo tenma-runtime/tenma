@@ -364,35 +364,46 @@ extern "C" fn tenma_rs_plugin_adopt(name: *const u8, name_len: usize, rid: u64) 
         eprintln!("tenma: plugin {name} does not adopt connections");
         return 0;
     };
-    let Some((outgoing, incoming, queued, unread)) = crate::streams::take_socket(rid) else {
+    let Some(taken) = crate::streams::take_socket(rid) else {
         eprintln!("tenma: request {rid} has no open WebSocket to adopt");
         return 0;
     };
     let conn = NEXT_CONN.fetch_add(1, Ordering::Relaxed);
+    let outgoing = taken.outgoing;
+    let queued = taken.queued;
     adopted(|map| map.insert(conn, Adopted { outgoing, queued }));
     adopt(conn);
-    // Incoming messages go to the plugin on the worker's loop; the plugin writes from wherever it likes.
-    // The guard tells the plugin when the connection is over, also when the worker restarts and drops
-    // this task
-    tokio::task::spawn_local(async move {
-        let _over = Over { conn, closed };
-        let mut incoming = incoming;
-        while let Some((data, binary)) = incoming.recv().await {
-            // Read: the limit on unread bytes counts down as for PHP's receive()
-            unread.set(unread.get().saturating_sub(data.len()));
-            message(conn, data.as_ptr(), data.len(), c_int::from(binary));
-        }
-    });
+    let adopter = Adopter {
+        conn,
+        message,
+        closed,
+    };
+    // What came while the socket was PHP's goes first; the rest the socket's task tells the plugin,
+    // on the I/O thread
+    for (data, binary) in &taken.unread {
+        adopter.message(data, *binary);
+    }
+    // A socket that ended meanwhile takes no adopter: dropped here, it tells the plugin closed()
+    let _ = taken.adopter.send(adopter);
     conn
 }
 
-/// An adopted connection ends, however its task ends: the plugin hears closed() once.
-struct Over {
+/// The plugin's side of an adopted connection, held by the socket's task. However that task ends,
+/// the plugin hears closed() once.
+pub struct Adopter {
     conn: u64,
+    message: extern "C" fn(u64, *const u8, usize, c_int),
     closed: extern "C" fn(u64),
 }
 
-impl Drop for Over {
+impl Adopter {
+    /// An incoming message, for the plugin.
+    pub fn message(&self, data: &[u8], binary: bool) {
+        (self.message)(self.conn, data.as_ptr(), data.len(), c_int::from(binary));
+    }
+}
+
+impl Drop for Adopter {
     fn drop(&mut self) {
         adopted(|map| map.remove(&self.conn));
         (self.closed)(self.conn);

@@ -81,15 +81,15 @@ message. Memory crosses the boundary only as pointer and length, valid for the d
 
 `TenmaPlugin`, plugin to tenma:
 
-| Field                                 | Called                                                                               |
-| ------------------------------------- | ------------------------------------------------------------------------------------ |
-| `name`                                | the name PHP uses, and for errors                                                    |
-| `call(fn, len, in, len, out)`         | on the worker thread, synchronous; 0 on success, otherwise the reply is the error    |
-| `call_async(fn, len, in, len, token)` | on the worker thread; returns at once and completes the token later from any thread  |
-| `adopt(conn)`                         | a PHP handler handed this connection over                                            |
-| `message(conn, ptr, len, binary)`     | an incoming message on an adopted connection, on tenma's I/O thread: return quickly  |
-| `closed(conn)`                        | the client or tenma closed an adopted connection                                     |
-| `shutdown()`                          | once, when tenma stops, after PHP has run its stop handlers                          |
+| Field                                 | Called                                                                              |
+| ------------------------------------- | ----------------------------------------------------------------------------------- |
+| `name`                                | the name PHP uses, and for errors                                                   |
+| `call(fn, len, in, len, out)`         | on the worker thread, synchronous; 0 on success, otherwise the reply is the error   |
+| `call_async(fn, len, in, len, token)` | on the worker thread; returns at once and completes the token later from any thread |
+| `adopt(conn)`                         | a PHP handler handed this connection over                                           |
+| `message(conn, ptr, len, binary)`     | an incoming message on an adopted connection, on tenma's I/O thread: return quickly |
+| `closed(conn)`                        | the client or tenma closed an adopted connection                                    |
+| `shutdown()`                          | once, when tenma stops, after PHP has run its stop handlers                         |
 
 `adopt`, `message`, `closed` and `shutdown` may be NULL. The test suite's plugin,
 `tests/plugins/echo/echo.c`, shows all of it in a hundred lines of C; the crate's documentation shows
